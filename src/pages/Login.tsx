@@ -78,7 +78,7 @@ const Login: React.FC = () => {
                                         <h2 className="text-[#111418] dark:text-white text-4xl font-black leading-tight tracking-[-0.033em]">Welcome to the Company ID Portal</h2>
                                         <p className="text-[#617289] dark:text-gray-400 text-base font-normal leading-normal">Generate and manage your official company identification with ease and security. Please sign in or create an account to get started.</p>
                                     </div>
-                                    <div className="w-full bg-center bg-no-repeat aspect-video bg-cover rounded-lg" style={{ backgroundImage: 'url("src/assets/Hanging-ID-Card-Mockup-01.jpg")' }}></div>
+                                    <div className="w-full bg-center bg-no-repeat aspect-video bg-cover rounded-lg" style={{ backgroundImage: 'url("/assets/Hanging-ID-Card-Mockup-01.jpg")' }}></div>
                                 </div>
                             </div>
                             {/* Right Side - Auth Forms */}
