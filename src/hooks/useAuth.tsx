@@ -74,7 +74,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             }
 
             const controller = new AbortController();
-            const timeoutDuration = 6000 + (i * 3000); // 6s, 9s, 12s
+            const timeoutDuration = 15000 + (i * 5000); // 15s, 20s, 25s
             const timeoutId = setTimeout(() => {
                 console.warn(`Profile fetch attempt ${i + 1} timing out after ${timeoutDuration}ms`);
                 controller.abort();
@@ -126,6 +126,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     const handleClearAuth = useCallback((isExplicitLogout = false) => {
         console.log('Clearing auth state...', { isExplicitLogout });
+        
+        // Safety: If we are on the reset password page, do NOT clear the state or redirect
+        // unless it's an explicit logout action. This prevents timing issues from
+        // kicking users out of the recovery flow.
+        if (window.location.pathname === '/reset-password' && !isExplicitLogout) {
+            console.log('handleClearAuth ignored because user is on /reset-password');
+            return;
+        }
+
         if (mounted.current) {
             setSession(null);
             setUserRole(null);
@@ -145,7 +154,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             });
         }
 
-        if (window.location.pathname !== '/' && window.location.pathname !== '/unauthorized') {
+        if (window.location.pathname !== '/' && window.location.pathname !== '/unauthorized' && window.location.pathname !== '/reset-password') {
             navigate('/', { replace: true });
         }
     }, [navigate]);
@@ -189,28 +198,38 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
         const timeoutId = setTimeout(() => {
             if (loadingRef.current && mounted.current) {
-                console.warn('Auth initialization timed out after 20s, forcing loading to false');
+                console.warn('Auth initialization timed out after 60s, forcing loading to false');
                 setLoading(false);
             }
-        }, 20000);
+        }, 60000);
 
         try {
             console.log('Initializing auth, verifying session...');
             
-            // Wrap getSession in a promise with timeout
+            // Wrap getSession in a promise with timeout - set to 45s
             const sessionPromise = supabase.auth.getSession();
             const sessionTimeout = new Promise<{ data: { session: Session | null }, error: any }>((_, reject) => 
-                setTimeout(() => reject(new Error('getSession timeout')), 10000)
+                setTimeout(() => {
+                    console.error('getSession timeout reached (45s)');
+                    reject(new Error('getSession timeout'));
+                }, 45000)
             );
 
+            console.log('Awaiting session promise...');
             const { data: { session: supabaseSession }, error } = await Promise.race([
                 sessionPromise,
                 sessionTimeout as any
             ]);
+            console.log('Session promise resolved:', { hasSession: !!supabaseSession, error });
 
             if (error) {
                 console.error('Supabase getSession error:', error);
-                handleClearAuth(false);
+                // If it's just a timeout, don't clear everything yet, maybe we have cached data
+                if (error.message !== 'getSession timeout') {
+                    handleClearAuth(false);
+                } else {
+                    console.warn('Proceeding with cached auth (if any) due to getSession timeout');
+                }
                 return;
             }
 
@@ -218,6 +237,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
             if (supabaseSession) {
                 console.log('Session found for user:', supabaseSession.user.id);
+                
+                // If we are on the reset password page, we don't need a profile immediately
+                if (window.location.pathname === '/reset-password') {
+                    console.log('initAuth: Reset password page detected, skipping profile fetch');
+                    setSession(supabaseSession);
+                    setLoading(false);
+                    return;
+                }
 
                 // Validate cache is for the same user
                 const cached = getCachedAuth();
@@ -307,7 +334,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, currentSession) => {
             if (!mounted.current) return;
 
-            console.log('Auth state change event:', event, 'user:', currentSession?.user?.id);
+            const isResetPasswordRoute = window.location.pathname === '/reset-password';
+            console.log('Auth state change event:', event, 'user:', currentSession?.user?.id, 'isResetRoute:', isResetPasswordRoute);
+
+            if (event === 'PASSWORD_RECOVERY' || event === 'USER_UPDATED' || (event === 'SIGNED_IN' && isResetPasswordRoute)) {
+                console.log(`Auth event ${event} detected during reset/recovery - skipping profile fetch`);
+                setSession(currentSession);
+                setLoading(false);
+                return;
+            }
 
             if (currentSession) {
                 // Validate cache is for the same user
@@ -340,6 +375,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 console.log('Auth event:', event, '- clearing session');
                 handleClearAuth(true);
             } else {
+                if (isResetPasswordRoute) {
+                    console.log('Ignoring state clear for event:', event, 'on reset-password route');
+                    setLoading(false);
+                    return;
+                }
                 console.log('Auth event:', event, 'with no session - clearing state');
                 handleClearAuth(false);
             }
