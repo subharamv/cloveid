@@ -1,6 +1,6 @@
 // src/pages/index.tsx
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Employee, PhotoTransform } from '@/types/employee';
 import { EmployeeForm } from '@/components/EmployeeForm';
 import { PhotoUpload } from '@/components/PhotoUpload';
@@ -16,17 +16,21 @@ import backLogoSvg from '@/assets/logo svg.png';
 import { Cloudinary } from '@cloudinary/url-gen';
 import { backgroundRemoval } from '@cloudinary/url-gen/actions/effect';
 import { imageToDataUrl } from '@/lib/utils';
+import { supabase } from '@/lib/supabaseClient';
 
 import AdminHeader from '../components/AdminHeader';
 import { useAuth } from '@/hooks/useAuth';
 
 const SingleCard: React.FC = () => {
     const { userRole, logout } = useAuth();
+    const location = useLocation();
+    const navigate = useNavigate();
 
     const { downloadZip } = useDownloadZip();
     const [isSidebarOpen, setSidebarOpen] = useState(false);
     const [frontLogoDataUrl, setFrontLogoDataUrl] = useState<string>('');
     const [backLogoDataUrl, setBackLogoDataUrl] = useState<string>('');
+    const [requestId, setRequestId] = useState<string | null>(null);
 
     const [employee, setEmployee] = useState<Employee>({
         fullName: '',
@@ -37,6 +41,59 @@ const SingleCard: React.FC = () => {
         countryCode: '+91',
         photo: null,
     });
+
+    useEffect(() => {
+        const params = new URLSearchParams(location.search);
+        const id = params.get('requestId');
+        if (id) {
+            setRequestId(id);
+            fetchRequestDetails(id);
+        }
+    }, [location.search]);
+
+    const fetchRequestDetails = async (id: string) => {
+        try {
+            const { data, error } = await supabase
+                .from('card_details')
+                .select('*')
+                .eq('id', id)
+                .single();
+
+            if (error) throw error;
+
+            if (data) {
+                setEmployee({
+                    fullName: data.full_name || '',
+                    employeeId: data.employee_id || '',
+                    bloodGroup: data.blood_group || '',
+                    branch: data.branch || '',
+                    emergencyContact: data.emergency_contact || '',
+                    countryCode: data.country_code || '+91',
+                    photo: null,
+                    photo_url: data.photo_url,
+                });
+
+                if (data.photo_url) {
+                    const img = new Image();
+                    img.crossOrigin = 'anonymous';
+                    img.onload = () => {
+                        setEditor(prev => ({
+                            ...prev,
+                            img,
+                            scale: 1,
+                            rotation: 0,
+                            tx: 0,
+                            ty: 0,
+                        }));
+                    };
+                    img.src = data.photo_url;
+                }
+            }
+        } catch (error) {
+            console.error('Error fetching request details:', error);
+            toast.error('Failed to load request details');
+        }
+    };
 
     const [showUploadNote, setShowUploadNote] = useState(true);
     const [modal, setModal] = useState({ isOpen: false, type: 'error' as 'error' | 'success', title: '', message: '' });
@@ -69,7 +126,7 @@ const SingleCard: React.FC = () => {
             try {
                 const frontLogoUrl = await imageToDataUrl(cloveLogo);
                 setFrontLogoDataUrl(frontLogoUrl);
-                
+
                 const backLogoUrl = await imageToDataUrl(backLogoSvg);
                 setBackLogoDataUrl(backLogoUrl);
             } catch (error) {
@@ -143,13 +200,147 @@ const SingleCard: React.FC = () => {
                     tx: 0,
                     ty: 0,
                 }));
-                setEmployee(prev => ({ ...prev, photo: file }));
+                setEmployee(prev => ({ ...prev, photo: file, photo_url: imageUrl }));
                 resolve();
             };
             img.onerror = reject;
             img.src = imageUrl;
         });
     }, [setEditor, setEmployee]);
+
+    const handleSave = async () => {
+        if (!employee.fullName || !employee.employeeId) {
+            toast.error('Please fill in employee name and ID.');
+            return;
+        }
+
+        try {
+            toast.info('Saving and generating ZIP...');
+
+            const frontCard = document.querySelector('.id-card-front') as HTMLElement;
+            const backCard = document.querySelector('.id-card-back') as HTMLElement;
+
+            let zipUrl = '';
+            let editedPhotoUrl = employee.photo_url; // default to original
+
+            // Generate and save the edited (transformed) photo
+            if (editor.img && editor.img.src) {
+                try {
+                    const offscreen = document.createElement('canvas');
+                    offscreen.width = TARGET_W_PX;
+                    offscreen.height = TARGET_H_PX;
+                    const oc = offscreen.getContext('2d');
+                    if (oc) {
+                        oc.fillStyle = '#fff';
+                        oc.fillRect(0, 0, offscreen.width, offscreen.height);
+                        oc.save();
+                        oc.translate(offscreen.width / 2, offscreen.height / 2);
+                        oc.rotate(editor.rotation);
+                        const coverScale = Math.max(offscreen.width / editor.img.width, offscreen.height / editor.img.height);
+                        const renderScale = coverScale * editor.scale;
+                        oc.scale(renderScale, renderScale);
+                        const dx = -editor.tx - editor.img.width / 2;
+                        const dy = -editor.ty - editor.img.height / 2;
+                        oc.drawImage(editor.img, dx, dy, editor.img.width, editor.img.height);
+                        oc.restore();
+
+                        // Convert canvas to blob and upload
+                        offscreen.toBlob(async (blob) => {
+                            if (blob) {
+                                const photoFileName = `edited-photos/${employee.employeeId}_${Date.now()}.png`;
+                                const { error: photoUploadError } = await supabase.storage
+                                    .from('id-card-images')
+                                    .upload(photoFileName, blob, { upsert: true });
+
+                                if (!photoUploadError) {
+                                    const { data: photoUrlData } = supabase.storage
+                                        .from('id-card-images')
+                                        .getPublicUrl(photoFileName);
+                                    editedPhotoUrl = photoUrlData.publicUrl;
+                                }
+                            }
+                        });
+                    }
+                } catch (photoErr) {
+                    console.error('Error generating edited photo:', photoErr);
+                    // Continue with original photo if edited version fails
+                }
+                // Small delay to allow blob upload to start
+                await new Promise(r => setTimeout(r, 500));
+            }
+
+            if (frontCard && backCard) {
+                try {
+                    const zipBlob = await downloadZip(employee, {
+                        img: editor.img,
+                        scale: editor.scale,
+                        rotation: editor.rotation,
+                        tx: editor.tx,
+                        ty: editor.ty,
+                    }, {
+                        w: TARGET_W_PX,
+                        h: TARGET_H_PX,
+                    }, frontCard, backCard, frontLogoDataUrl, backLogoDataUrl);
+
+                    const zipFileName = `zips/${employee.employeeId}_${Date.now()}.zip`;
+                    const { error: uploadError } = await supabase.storage
+                        .from('id-card-images')
+                        .upload(zipFileName, zipBlob, { upsert: true });
+
+                    if (uploadError) throw uploadError;
+
+                    const { data: publicUrlData } = supabase.storage
+                        .from('id-card-images')
+                        .getPublicUrl(zipFileName);
+
+                    zipUrl = publicUrlData.publicUrl;
+                } catch (zipErr) {
+                    console.error('Error generating or uploading ZIP:', zipErr);
+                    // Continue saving even if ZIP fails, but log it
+                }
+            }
+
+            const requestData = {
+                full_name: employee.fullName,
+                employee_id: employee.employeeId,
+                blood_group: employee.bloodGroup,
+                branch: employee.branch,
+                emergency_contact: employee.emergencyContact,
+                country_code: employee.countryCode,
+                photo_url: editedPhotoUrl,
+                zip_url: zipUrl,
+                status: 'Pending',
+                is_edited: true,
+                updated_at: new Date().toISOString(),
+            };
+
+            let error;
+            if (requestId) {
+                // Update existing
+                const { error: updateError } = await supabase
+                    .from('card_details')
+                    .update(requestData)
+                    .eq('id', requestId);
+                error = updateError;
+            } else {
+                // Create new
+                const { error: insertError } = await supabase
+                    .from('card_details')
+                    .insert([{ ...requestData, created_at: new Date().toISOString() }]);
+                error = insertError;
+            }
+
+            if (error) throw error;
+
+            toast.success(requestId ? 'Request updated successfully' : 'Card details saved successfully');
+
+            // Redirect to dashboard after saving
+            setTimeout(() => navigate('/dashboard'), 1500);
+        } catch (error) {
+            console.error('Error saving card details:', error);
+            toast.error('Failed to save card details');
+        }
+    };
 
     // drawEditor: paints the editor.img into the visible canvas sized to photoBoxRef
     const drawEditor = useCallback(() => {
@@ -411,6 +602,8 @@ const SingleCard: React.FC = () => {
             photo: null,
         });
 
+        setRequestId(null);
+
         setEditor({
             img: null,
             scale: 1,
@@ -447,8 +640,8 @@ const SingleCard: React.FC = () => {
     const onPrint = async () => {
         toast.info('Generating PDF for printing...');
 
-        const frontCard = document.querySelector('.id-card-front-container') as HTMLElement;
-        const backCard = document.querySelector('.id-card-back-container') as HTMLElement;
+        const frontCard = document.querySelector('.id-card-front') as HTMLElement;
+        const backCard = document.querySelector('.id-card-back') as HTMLElement;
 
         if (!frontCard || !backCard) {
             toast.error('Error generating PDF: Card elements not found.');
@@ -560,6 +753,8 @@ const SingleCard: React.FC = () => {
                         <ActionButtons
                             employee={employee}
                             isPhotoUploaded={!!editor.img}
+                            onSave={handleSave}
+                            setIsSidebarOpen={setSidebarOpen}
                             onDownloadPNG={async () => {
                                 toast.info('Generating PNG files...');
 

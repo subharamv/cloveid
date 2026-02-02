@@ -8,6 +8,8 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: true,
-    flowType: 'pkce'
+    flowType: 'pkce',
+    // Session expires after 5 minutes of inactivity (300 seconds)
+    sessionRefreshThreshold: 50  // Refresh token when 50s left before expiry
   }
 })

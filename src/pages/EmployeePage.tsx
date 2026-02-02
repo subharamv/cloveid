@@ -25,12 +25,12 @@ import { backgroundRemoval } from '@cloudinary/url-gen/actions/effect';
 import { imageToDataUrl } from '@/lib/utils';
 
 import '@/styles/EmployeePage.css';
-    const EmployeePage: React.FC = () => {
+const EmployeePage: React.FC = () => {
     const { downloadZip } = useDownloadZip();
     const navigate = useNavigate();
     const { logout, clearSession } = useAuth();
     const [isSidebarOpen, setSidebarOpen] = useState(false);
-    
+
     const [backLogoDataUrl, setBackLogoDataUrl] = useState<string>('');
     const [isCardFlipped, setCardFlipped] = useState(false);
 
@@ -89,10 +89,10 @@ import '@/styles/EmployeePage.css';
         const fetchProfile = async () => {
             try {
                 const { data: { user } } = await supabase.auth.getUser();
-                
+
                 if (user) {
                     const employeeId = user.user_metadata?.employee_id || '';
-                    
+
                     const { data: profile } = await supabase
                         .from('profiles')
                         .select('*')
@@ -104,6 +104,7 @@ import '@/styles/EmployeePage.css';
                             ...prev,
                             fullName: profile.full_name || prev.fullName,
                             employeeId: employeeId || prev.employeeId,
+                            bloodGroup: profile.blood_group || prev.bloodGroup,
                             branch: profile.branch || prev.branch,
                             emergencyContact: profile.phone || prev.emergencyContact,
                         }));
@@ -577,30 +578,29 @@ import '@/styles/EmployeePage.css';
             <div className="relative flex h-auto min-h-screen w-full flex-col group/design-root overflow-x-hidden">
                 <div className="layout-container flex h-full grow flex-col">
                     <header className="flex items-center justify-between whitespace-nowrap border-b border-solid border-b-gray-200 dark:border-b-gray-700 px-4 py-3 bg-white dark:bg-gray-800 shadow-md">
-                    <div className="flex items-center gap-4 text-gray-900 dark:text-white">
-                        <button className="lg:hidden" onClick={() => setSidebarOpen(true)}>
-                            <span className="material-symbols-outlined text-2xl">menu</span>
-                        </button>
-                        <img src={logo} alt="Logo" className="h-8 w-auto" />
-                    </div>
-                    <div className="hidden lg:flex flex-1 justify-center gap-8">
-                        <div className="flex items-center gap-9">
-                            <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="/user-dashboard">Dashboard</Link>
-                            <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="/employee-page">Raise New Card</Link>
-                            <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="/track-status">Track Status</Link>
-                            <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="/user-dashboard">Settings</Link>
+                        <div className="flex items-center gap-4 text-gray-900 dark:text-white">
+                            <button className="lg:hidden" onClick={() => setSidebarOpen(true)}>
+                                <span className="material-symbols-outlined text-2xl">menu</span>
+                            </button>
+                            <img src={logo} alt="Logo" className="h-8 w-auto" />
                         </div>
-                    </div>
-                    <div className="flex items-center justify-end gap-4">
-                        <button className="flex max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-full h-10 w-10 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">
-                            <span className="material-symbols-outlined text-xl">notifications</span>
-                        </button>
-                        <div className="bg-center bg-no-repeat aspect-square bg-cover rounded-full size-10" data-alt="User avatar image" style={{ backgroundImage: 'url("https://lh3.googleusercontent.com/aida-public/AB6AXuDTuk1Iosn49fHWfKjAP9fBJw3pQzsM6YL5zr-Cxka0K6IIkmxhTiisNLHxHNnJ9KANzspNqOKesKX_0x9HyVIotvJDUojrFn2AWhrITYpZtN0xi9T7ugql-9wNJQnqPuWDUZnZIbtnSxLe2Onfl1FMn0BF4vM61YkMxGtaPP6Gq-SqEPQfugyzpPDy7QoNGts7_1Abd7NSO-7z37gh5XlZ1BW6zV02LVXWhiY9TQDiVZOFWYhWBBRvJEJZ7Ys0spYA1NDiqcHthFzB")' }}></div>
-                        <button onClick={logout} className="flex max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-full h-10 w-10 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">
-                            <span className="material-symbols-outlined text-xl">logout</span>
-                        </button>
-                    </div>
-                </header>
+                        <div className="hidden lg:flex flex-1 justify-center gap-8">
+                            <div className="flex items-center gap-9">
+                                <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="/user-dashboard">Dashboard</Link>
+                                <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="/employee-page">Raise New Card</Link>
+                                <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="/user-dashboard">Settings</Link>
+                            </div>
+                        </div>
+                        <div className="flex items-center justify-end gap-4">
+                            <button className="flex max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-full h-10 w-10 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">
+                                <span className="material-symbols-outlined text-xl">notifications</span>
+                            </button>
+                            <div className="bg-center bg-no-repeat aspect-square bg-cover rounded-full size-10" data-alt="User avatar image" style={{ backgroundImage: 'url("https://lh3.googleusercontent.com/aida-public/AB6AXuDTuk1Iosn49fHWfKjAP9fBJw3pQzsM6YL5zr-Cxka0K6IIkmxhTiisNLHxHNnJ9KANzspNqOKesKX_0x9HyVIotvJDUojrFn2AWhrITYpZtN0xi9T7ugql-9wNJQnqPuWDUZnZIbtnSxLe2Onfl1FMn0BF4vM61YkMxGtaPP6Gq-SqEPQfugyzpPDy7QoNGts7_1Abd7NSO-7z37gh5XlZ1BW6zV02LVXWhiY9TQDiVZOFWYhWBBRvJEJZ7Ys0spYA1NDiqcHthFzB")' }}></div>
+                            <button onClick={logout} className="flex max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-full h-10 w-10 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">
+                                <span className="material-symbols-outlined text-xl">logout</span>
+                            </button>
+                        </div>
+                    </header>
                     <main className="flex-1 px-4 sm:px-6 lg:px-10 py-8">
                         <div className="max-w-7xl mx-auto">
                             <div className="flex flex-wrap justify-between gap-4 mb-8">
@@ -630,27 +630,27 @@ import '@/styles/EmployeePage.css';
                                 </div>
                                 <div className="lg:col-span-2 space-y-8">
                                     <div className="bg-white dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-800 p-6 sm:p-8">
-                                         <div className="flex justify-between items-center mb-2">
-                                             <h2 className="text-slate-900 dark:text-white text-[22px] font-bold leading-tight tracking-[-0.015em]">Live Preview</h2>
-                                             <button onClick={() => setIsEditingPhoto(!isEditingPhoto)} className="flex items-center justify-center rounded-lg h-10 px-4 bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-white text-sm font-bold">
-                                                 {isEditingPhoto ? <span className="material-symbols-outlined">check</span> : <span className="material-symbols-outlined">edit</span>}
-                                             </button>
-                                         </div>
-                                         <p className="text-slate-500 dark:text-slate-400 text-xs font-normal leading-normal mb-4">Click the card to see the back</p>
-                                         {isEditingPhoto && (
-                                             <div className="flex justify-center items-center gap-2 my-4">
-                                                 <button onClick={handleZoomOut} className="p-2 rounded-full bg-slate-200 dark:bg-slate-700"><span className="material-symbols-outlined">zoom_out</span></button>
-                                                 <button onClick={handleZoomIn} className="p-2 rounded-full bg-slate-200 dark:bg-slate-700"><span className="material-symbols-outlined">zoom_in</span></button>
-                                                 <button onClick={handleRotateLeft} className="p-2 rounded-full bg-slate-200 dark:bg-slate-700"><span className="material-symbols-outlined">rotate_left</span></button>
-                                                 <button onClick={handleRotateRight} className="p-2 rounded-full bg-slate-200 dark:bg-slate-700"><span className="material-symbols-outlined">rotate_right</span></button>
-                                                 <button onClick={handleResetPos} className="p-2 rounded-full bg-slate-200 dark:bg-slate-700"><span className="material-symbols-outlined">refresh</span></button>
-                                             </div>
-                                         )}
+                                        <div className="flex justify-between items-center mb-2">
+                                            <h2 className="text-slate-900 dark:text-white text-[22px] font-bold leading-tight tracking-[-0.015em]">Live Preview</h2>
+                                            <button onClick={() => setIsEditingPhoto(!isEditingPhoto)} className="flex items-center justify-center rounded-lg h-10 px-4 bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-white text-sm font-bold">
+                                                {isEditingPhoto ? <span className="material-symbols-outlined">check</span> : <span className="material-symbols-outlined">edit</span>}
+                                            </button>
+                                        </div>
+                                        <p className="text-slate-500 dark:text-slate-400 text-xs font-normal leading-normal mb-4">Click the card to see the back</p>
+                                        {isEditingPhoto && (
+                                            <div className="flex justify-center items-center gap-2 my-4">
+                                                <button onClick={handleZoomOut} className="p-2 rounded-full bg-slate-200 dark:bg-slate-700"><span className="material-symbols-outlined">zoom_out</span></button>
+                                                <button onClick={handleZoomIn} className="p-2 rounded-full bg-slate-200 dark:bg-slate-700"><span className="material-symbols-outlined">zoom_in</span></button>
+                                                <button onClick={handleRotateLeft} className="p-2 rounded-full bg-slate-200 dark:bg-slate-700"><span className="material-symbols-outlined">rotate_left</span></button>
+                                                <button onClick={handleRotateRight} className="p-2 rounded-full bg-slate-200 dark:bg-slate-700"><span className="material-symbols-outlined">rotate_right</span></button>
+                                                <button onClick={handleResetPos} className="p-2 rounded-full bg-slate-200 dark:bg-slate-700"><span className="material-symbols-outlined">refresh</span></button>
+                                            </div>
+                                        )}
 
                                         <div className={`relative h-[400px] w-full perspective-1000 flex items-center justify-center`} >
                                             <div
                                                 className={`relative w-full h-full max-w-sm transition-transform duration-700 transform-style-preserve-3d ${!isEditingPhoto && 'cursor-pointer'} ${isCardFlipped ? 'rotate-y-180' : ''}`}
-                                                 onClick={() => !isEditingPhoto && setCardFlipped(!isCardFlipped)}
+                                                onClick={() => !isEditingPhoto && setCardFlipped(!isCardFlipped)}
                                             >
                                                 <div className="absolute w-full h-full backface-hidden">
                                                     <div className="w-full h-full mx-auto bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900 rounded-2xl p-6 shadow-lg flex items-center justify-center">

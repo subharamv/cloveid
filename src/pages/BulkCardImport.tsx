@@ -8,17 +8,54 @@ const BulkCardImport = () => {
     const navigate = useNavigate();
     const { logout } = useAuth();
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+    const [isDragActive, setIsDragActive] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
-        if (file) {
+        if (file && isValidFile(file)) {
             navigate('/map-fields', { state: { file } });
         }
     };
 
+    const isValidFile = (file: File) => {
+        const validTypes = ['.csv', '.xlsx', '.xls'];
+        const validMimeTypes = [
+            'text/csv',
+            'application/csv',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'application/vnd.ms-excel'
+        ];
+
+        const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase();
+        return validTypes.includes(fileExtension) || validMimeTypes.includes(file.type);
+    };
+
     const handleChooseFileClick = () => {
         fileInputRef.current?.click();
+    };
+
+    const handleDrag = (e: React.DragEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.type === 'dragenter' || e.type === 'dragover') {
+            setIsDragActive(true);
+        } else if (e.type === 'dragleave') {
+            setIsDragActive(false);
+        }
+    };
+
+    const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragActive(false);
+
+        const file = e.dataTransfer.files?.[0];
+        if (file && isValidFile(file)) {
+            navigate('/map-fields', { state: { file } });
+        } else if (file) {
+            alert('Please drop a valid CSV or XLSX file');
+        }
     };
 
     return (
@@ -52,17 +89,24 @@ const BulkCardImport = () => {
                         <div
                             className="flex flex-col p-4 bg-white dark:bg-[#18212b] rounded-xl border border-gray-200 dark:border-gray-800">
                             <div
-                                className="flex flex-col items-center gap-6 rounded-lg border-2 border-dashed border-[#dbe0e6] dark:border-gray-700 px-6 py-14 bg-background-light dark:bg-background-dark">
+                                onDragEnter={handleDrag}
+                                onDragLeave={handleDrag}
+                                onDragOver={handleDrag}
+                                onDrop={handleDrop}
+                                className={`flex flex-col items-center gap-6 rounded-lg border-2 border-dashed px-6 py-14 bg-background-light dark:bg-background-dark cursor-pointer transition-colors ${isDragActive
+                                        ? 'border-primary bg-primary/5 dark:bg-primary/10'
+                                        : 'border-[#dbe0e6] dark:border-gray-700'
+                                    }`}>
                                 <div className="flex flex-col items-center gap-2">
                                     <span className="material-symbols-outlined text-primary"
                                         style={{ fontSize: '48px' }}>cloud_upload</span>
                                     <p
                                         className="text-[#111418] dark:text-white text-lg font-bold leading-tight tracking-[-0.015em] text-center">
-                                        Drag & drop your CSV file here</p>
+                                        Drag & drop your CSV or XLSX file here</p>
                                     <p className="text-[#617289] dark:text-gray-400 text-sm font-normal leading-normal text-center">
                                         or click to browse</p>
                                 </div>
-                                <input type="file" accept=".csv" ref={fileInputRef} onChange={handleFileChange} style={{ display: 'none' }} />
+                                <input type="file" accept=".csv,.xlsx,.xls" ref={fileInputRef} onChange={handleFileChange} style={{ display: 'none' }} />
                                 <button
                                     onClick={handleChooseFileClick}
                                     className="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-10 px-4 bg-primary text-white text-sm font-bold leading-normal tracking-[0.015em]">
@@ -73,7 +117,7 @@ const BulkCardImport = () => {
                         <div className="text-center">
                             <a className="text-[#617289] dark:text-gray-400 text-sm font-normal leading-normal underline hover:text-primary dark:hover:text-primary"
                                 href="/template.csv" download>Don't have a template? Download our CSV template</a>
-                            <p className="text-[#617289] dark:text-gray-500 text-xs mt-2">Accepted format: .csv. Max file size: 5MB.
+                            <p className="text-[#617289] dark:text-gray-500 text-xs mt-2">Accepted formats: .csv, .xlsx, .xls. Max file size: 5MB.
                             </p>
                         </div>
                     </div>

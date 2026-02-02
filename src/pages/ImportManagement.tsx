@@ -67,12 +67,58 @@ const ImportManagement = () => {
         }
     };
 
+    const checkAndUpdateBatchStatus = async (batchIdToCheck: string) => {
+        if (!batchIdToCheck) return;
+
+        try {
+            // Get all cards in this batch and check if all are completed
+            const { data: cards, error: cardsError } = await supabase
+                .from('id_cards')
+                .select('id, status, print_status')
+                .eq('batch_id', batchIdToCheck);
+
+            if (cardsError) {
+                console.error('Error fetching cards for batch status check:', cardsError);
+                return;
+            }
+
+            if (!cards || cards.length === 0) {
+                return;
+            }
+
+            // Check if all cards have print_status as 'printed' or 'ready_to_collect'
+            const allCompleted = cards.every(card =>
+                card.print_status === 'printed' || card.print_status === 'ready_to_collect'
+            );
+
+            if (allCompleted) {
+                // Update batch status to 'completed'
+                const { error: updateError } = await supabase
+                    .from('card_batches')
+                    .update({
+                        status: 'completed',
+                        completed_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('batch_id', batchIdToCheck);
+
+                if (updateError) {
+                    console.error('Error updating batch status:', updateError);
+                } else {
+                    toast.success('Batch marked as completed!');
+                }
+            }
+        } catch (error) {
+            console.error('Error in checkAndUpdateBatchStatus:', error);
+        }
+    };
+
     useEffect(() => {
         const fetchBatchData = async () => {
             if (location.state?.batchId) {
                 const bId = location.state.batchId;
                 setBatchId(bId);
-                
+
                 const { data: cards, error } = await supabase
                     .from('id_cards')
                     .select('*')
@@ -134,7 +180,7 @@ const ImportManagement = () => {
             if (updatedBatchId) {
                 setBatchId(updatedBatchId);
             }
-            
+
             const dataToUpdate = updatedCsvData || initialCsvData;
             const newCsvData = dataToUpdate.map((row: any[]) => [...row]);
 
@@ -165,7 +211,7 @@ const ImportManagement = () => {
                         newRow[headerIndex] = updatedEmployee[employeeKey as keyof typeof updatedEmployee];
                     }
                 });
-                
+
                 // Update the row in newCsvData
                 newCsvData[rowIndex] = newRow;
 
@@ -177,15 +223,15 @@ const ImportManagement = () => {
                 const currentCardIds = updatedCardIds || cardIds;
                 const currentBatchId = updatedBatchId || batchId;
 
-                navigate(location.pathname, { 
-                    replace: true, 
-                    state: { 
-                        csvData: newCsvData, 
-                        headers: headersToUse, 
+                navigate(location.pathname, {
+                    replace: true,
+                    state: {
+                        csvData: newCsvData,
+                        headers: headersToUse,
                         zipUrls: currentZipUrls,
                         cardIds: currentCardIds,
                         batchId: currentBatchId
-                    } 
+                    }
                 });
             }
         }
@@ -208,6 +254,29 @@ const ImportManagement = () => {
         }
     }, []);
 
+    // Initialize missing cardPrintStatuses with default value
+    useEffect(() => {
+        const initializeStatuses = () => {
+            const updatedStatuses = { ...cardPrintStatuses };
+            let hasChanges = false;
+
+            csvData.forEach((_, index) => {
+                if (!updatedStatuses[index]) {
+                    updatedStatuses[index] = 'sent_for_printing'; // Default status
+                    hasChanges = true;
+                }
+            });
+
+            if (hasChanges) {
+                setCardPrintStatuses(updatedStatuses);
+            }
+        };
+
+        if (csvData.length > 0) {
+            initializeStatuses();
+        }
+    }, [csvData]);
+
     const getPhotoColumnIndex = React.useCallback(() => {
         const lowerCaseHeaders = headers.map(h => String(h || '').toLowerCase());
         const photoIndex = lowerCaseHeaders.indexOf('photo (upload)');
@@ -226,24 +295,77 @@ const ImportManagement = () => {
         navigate('/bulk-card-editor', { state: { rowData, headers, rowIndex, csvData, zipUrls, cardId, batchId, cardIds } });
     };
 
-    const handleDownload = (rowData: string[], rowIndex: number) => {
+    const handleDownload = async (rowData: string[], rowIndex: number) => {
         const fullNameIndex = headers.indexOf('Full Name');
         const employeeName = fullNameIndex !== -1 ? rowData[fullNameIndex] : 'employee';
 
         const zipUrl = zipUrls[rowIndex];
+        const cardId = cardIds[rowIndex];
+
         if (!zipUrl) {
             toast.error('ZIP file not available. Please edit and save the employee first.');
             return;
         }
 
         try {
+            // Update print_status to 'printed' in id_cards table
+            if (cardId) {
+                const { error: updateError } = await supabase
+                    .from('id_cards')
+                    .update({
+                        print_status: 'printed',
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('id', cardId);
+
+                if (updateError) {
+                    console.error('Error updating print status:', updateError);
+                    toast.error('Error updating card status');
+                    return;
+                }
+
+                // Also update vendor_requests status to 'completed'
+                const { error: vendorError } = await supabase
+                    .from('vendor_requests')
+                    .update({
+                        status: 'completed',
+                        created_at: new Date().toISOString()
+                    })
+                    .eq('id_card_id', cardId);
+
+                if (vendorError) {
+                    console.error('Error updating vendor request status:', vendorError);
+                    // Don't fail the download if vendor_requests update fails
+                }
+
+                // Fetch the latest print_status from database to ensure UI is up-to-date
+                const { data: updatedCard, error: fetchError } = await supabase
+                    .from('id_cards')
+                    .select('print_status')
+                    .eq('id', cardId)
+                    .single();
+
+                if (!fetchError && updatedCard) {
+                    // Update local state with fresh data from database
+                    const newStatuses = { ...cardPrintStatuses };
+                    newStatuses[rowIndex] = updatedCard.print_status || 'printed';
+                    setCardPrintStatuses(newStatuses);
+                }
+
+                // Check if batch is now complete
+                if (batchId) {
+                    await checkAndUpdateBatchStatus(batchId);
+                }
+            }
+
+            // Proceed with download
             const link = document.createElement('a');
             link.href = zipUrl;
             link.download = `${employeeName.replace(/ /g, '_')}_ID_Card.zip`;
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
-            toast.success('Download started!');
+            toast.success('Download started and status updated to printed!');
         } catch (error) {
             console.error('Download error:', error);
             toast.error('Failed to download ZIP file');
@@ -271,7 +393,7 @@ const ImportManagement = () => {
                     .select('batch_id')
                     .order('batch_id', { ascending: false })
                     .limit(1);
-                
+
                 let nextBatchNumber = 1;
                 if (lastBatch && lastBatch.length > 0) {
                     const lastId = lastBatch[0].batch_id;
@@ -301,14 +423,14 @@ const ImportManagement = () => {
                     .from('card_batches')
                     .update({ total_cards: csvData.length, updated_at: new Date().toISOString() })
                     .eq('batch_id', finalBatchId);
-                
+
                 // Delete cards that were marked for deletion
                 if (deletedCardIds.length > 0) {
                     const { error: deleteError } = await supabase
                         .from('id_cards')
                         .delete()
                         .in('id', deletedCardIds);
-                    
+
                     if (deleteError) {
                         console.error('Error deleting cards:', deleteError);
                         // Continue anyway, it's just cleanup
@@ -347,11 +469,11 @@ const ImportManagement = () => {
                         const blob = await response.blob();
                         const fileName = `${employeeIdStr}_${prefix}.${ext}`;
                         const path = `bulk/${finalBatchId}/${fileName}`;
-                        
+
                         const { error } = await supabase.storage
                             .from('id-card-images')
                             .upload(path, blob, { upsert: true });
-                        
+
                         if (error) throw error;
                         return supabase.storage.from('id-card-images').getPublicUrl(path).data.publicUrl;
                     } catch (err) {
@@ -369,7 +491,7 @@ const ImportManagement = () => {
                 if (!employee) {
                     const email = emailIndex !== -1 ? String(row[emailIndex] || '').trim() : `${employeeIdStr.toLowerCase()}@clove.com`;
                     const rawBranch = branchIndex !== -1 ? String(row[branchIndex] || '').toUpperCase().trim() : 'HYD';
-                    
+
                     // Validate branch enum: 'HYD', 'VIZAG', 'BLR', 'MUM', 'DEL'
                     const validBranches = ['HYD', 'VIZAG', 'BLR', 'MUM', 'DEL'];
                     const finalBranch = validBranches.includes(rawBranch) ? rawBranch : 'HYD';
@@ -384,7 +506,7 @@ const ImportManagement = () => {
                         }])
                         .select()
                         .single();
-                    
+
                     if (empError) {
                         console.error(`Error creating employee for row ${i}:`, empError);
                         continue;
@@ -396,7 +518,7 @@ const ImportManagement = () => {
 
                 // 4. Prepare card data and upload local media
                 const cardData: Record<string, any> = {};
-                
+
                 // Upload edited photo if it's local
                 if (photoIndex !== -1 && row[photoIndex]) {
                     row[photoIndex] = await uploadMedia(row[photoIndex], 'photo', 'png');
@@ -458,6 +580,68 @@ const ImportManagement = () => {
         try {
             const fullNameIndex = headers.indexOf('Full Name');
 
+            // First, update all selected cards to 'printed' status in database
+            const cardIdsToUpdate = Array.from(selectedRows)
+                .map(rowIndex => cardIds[rowIndex])
+                .filter(id => id !== undefined);
+
+            if (cardIdsToUpdate.length > 0) {
+                // Update id_cards table
+                const { error: updateError } = await supabase
+                    .from('id_cards')
+                    .update({
+                        print_status: 'printed',
+                        updated_at: new Date().toISOString()
+                    })
+                    .in('id', cardIdsToUpdate);
+
+                if (updateError) {
+                    console.error('Error updating print status:', updateError);
+                    toast.error('Error updating card statuses');
+                    return;
+                }
+
+                // Also update vendor_requests status to 'completed' for these cards
+                const { error: vendorError } = await supabase
+                    .from('vendor_requests')
+                    .update({
+                        status: 'completed',
+                        created_at: new Date().toISOString()
+                    })
+                    .in('id_card_id', cardIdsToUpdate);
+
+                if (vendorError) {
+                    console.error('Error updating vendor request status:', vendorError);
+                    // Don't fail the download if vendor_requests update fails
+                }
+
+                // Fetch the latest print_status from database for all updated cards
+                const { data: updatedCards, error: fetchError } = await supabase
+                    .from('id_cards')
+                    .select('id, print_status')
+                    .in('id', cardIdsToUpdate);
+
+                // Update local state with fresh data from database
+                const newStatuses = { ...cardPrintStatuses };
+                if (!fetchError && updatedCards) {
+                    updatedCards.forEach(card => {
+                        // Find the rowIndex for this card
+                        for (const rowIndex of selectedRows) {
+                            if (cardIds[rowIndex] === card.id) {
+                                newStatuses[rowIndex] = card.print_status || 'printed';
+                            }
+                        }
+                    });
+                } else {
+                    // Fallback: update with local state if fetch fails
+                    for (const rowIndex of selectedRows) {
+                        newStatuses[rowIndex] = 'printed';
+                    }
+                }
+                setCardPrintStatuses(newStatuses);
+            }
+
+            // Proceed with download
             const masterZip = new JSZip();
             let hasValidZips = false;
 
@@ -500,7 +684,13 @@ const ImportManagement = () => {
             link.click();
             document.body.removeChild(link);
             URL.revokeObjectURL(link.href);
-            toast.success('Download started!');
+
+            // Check if batch is now complete
+            if (batchId) {
+                await checkAndUpdateBatchStatus(batchId);
+            }
+
+            toast.success('Download started and statuses updated to printed!');
         } catch (error) {
             console.error('Download error:', error);
             toast.error('Failed to download ZIP files');
@@ -569,7 +759,7 @@ const ImportManagement = () => {
         const newCardIds: Record<number, number> = {};
         const newZipUrls: Record<number, string> = {};
         const newPrintStatuses: Record<number, string> = {};
-        
+
         let newIdx = 0;
         csvData.forEach((row, oldIdx) => {
             if (selectedRows.has(oldIdx)) {
@@ -591,7 +781,7 @@ const ImportManagement = () => {
         setZipUrls(newZipUrls);
         setCardPrintStatuses(newPrintStatuses);
         setSelectedRows(new Set());
-        
+
         toast.success(`Deleted ${selectedRows.size} rows`);
     };
 
@@ -608,7 +798,7 @@ const ImportManagement = () => {
         setIsSaving(true);
         try {
             console.log('Starting deletion for batch:', batchId);
-            
+
             // Delete id_cards first
             const { error: cardsError, count: cardsCount } = await supabase
                 .from('id_cards')
@@ -802,7 +992,7 @@ const ImportManagement = () => {
                         .select('zip_url, photo_url')
                         .eq('id', cardId)
                         .single();
-                    
+
                     if (cardData?.zip_url) {
                         existingZipUrl = cardData.zip_url;
                     }
@@ -859,7 +1049,7 @@ const ImportManagement = () => {
                         .from('id_cards')
                         .update({ status: 'sent_for_printing', print_status: 'sent_for_printing' })
                         .eq('id', cardId);
-                    
+
                     // Update local state to reflect change immediately
                     setCardPrintStatuses(prev => ({
                         ...prev,
@@ -890,7 +1080,7 @@ const ImportManagement = () => {
                         .eq('batch_id', batchId)
                         .not('status', 'in', '("sent_for_printing","printed","ready_to_collect")')
                         .not('print_status', 'in', '("sent_for_printing","printed","ready_to_collect")');
-                    
+
                     if (!remainingCards || remainingCards.length === 0) {
                         await supabase
                             .from('card_batches')
@@ -968,99 +1158,122 @@ const ImportManagement = () => {
                                 </button>
                             </div>
                         </div>
-                        
-                    <div className="flex flex-col gap-8">
-                        <div
-                            className="bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-800 rounded-xl shadow-sm overflow-hidden">
+
+                        <div className="flex flex-col gap-8">
                             <div
-                                className="p-4 border-b border-gray-200 dark:border-gray-700 flex flex-col md:flex-row gap-4 items-center justify-between">
-                                <div className="w-full md:w-1/3">
-                                    <label className="flex flex-col min-w-40 h-10 w-full relative">
-                                        <div className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">
-                                            <span className="material-symbols-outlined text-[20px]">search</span>
-                                        </div>
-                                        <input
-                                            className="text-gray-500 dark:text-gray-400 flex bg-white dark:bg-gray-900 items-center justify-center pl-10 rounded-lg border border-gray-200 dark:border-gray-700 h-full placeholder:text-gray-500 dark:placeholder:text-gray-400 px-4 text-sm font-normal leading-normal focus:outline-none focus:ring-2 focus:ring-primary/20"
-                                            placeholder="Search by Name, Employee ID, or Branch..."
-                                            value={searchQuery}
-                                            onChange={(e) => setSearchQuery(e.target.value)}
-                                        />
-                                    </label>
-                                </div>
-                                <div className="flex gap-2 overflow-x-auto w-full md:w-auto pb-2 md:pb-0 items-center">
-                                    <button
-                                        className={`flex h-8 shrink-0 items-center justify-center gap-x-2 rounded-full px-4 text-sm font-medium transition-colors ${!filterAvailableOnly ? 'bg-primary text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}`}
-                                        onClick={() => setFilterAvailableOnly(false)}
-                                    >
-                                        All <span className={`ml-1 text-xs rounded-full px-1.5 py-0.5 ${!filterAvailableOnly ? 'bg-white/20 text-white' : 'bg-gray-200 dark:bg-gray-600'}`}>{csvData.length}</span>
-                                    </button>
-                                    <button
-                                        onClick={() => setFilterAvailableOnly(true)}
-                                        className={`flex h-8 shrink-0 items-center justify-center gap-x-2 rounded-full px-4 text-sm font-medium transition-colors ${filterAvailableOnly ? 'bg-primary text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}`}
-                                    >
-                                        <span className="material-symbols-outlined text-[18px]">check_circle</span>
-                                        Available
-                                    </button>
-                                    <button
-                                        className="flex h-8 shrink-0 items-center justify-center gap-x-2 rounded-full px-4 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 text-sm font-medium transition-colors"
-                                    >
-                                        Pending
-                                    </button>
-                                    <button
-                                        className="flex h-8 shrink-0 items-center justify-center gap-x-2 rounded-full px-4 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 text-sm font-medium transition-colors"
-                                    >
-                                        Approved
-                                    </button>
-                                    <button
-                                        className="flex h-8 shrink-0 items-center justify-center gap-x-2 rounded-full px-4 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 text-sm font-medium transition-colors"
-                                    >
-                                        Printed
-                                    </button>
-                                </div>
-                            </div>
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-sm text-left text-gray-500 dark:text-gray-400">
-                                <thead className="text-xs text-gray-700 dark:text-gray-300 uppercase bg-gray-50 dark:bg-gray-800">
-                                    <tr>
-                                        <th className="px-6 py-3">
+                                className="bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-800 rounded-xl shadow-sm overflow-hidden">
+                                <div
+                                    className="p-4 border-b border-gray-200 dark:border-gray-700 flex flex-col md:flex-row gap-4 items-center justify-between">
+                                    <div className="w-full md:w-1/3">
+                                        <label className="flex flex-col min-w-40 h-10 w-full relative">
+                                            <div className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">
+                                                <span className="material-symbols-outlined text-[20px]">search</span>
+                                            </div>
                                             <input
-                                                type="checkbox"
-                                                checked={selectedRows.size > 0 && selectedRows.size === filteredData.length}
-                                                ref={input => {
-                                                    if (input) {
-                                                        input.indeterminate = selectedRows.size > 0 && selectedRows.size < filteredData.length;
-                                                    }
-                                                }}
-                                                onChange={(e) => handleSelectAll(e.target.checked)}
+                                                className="text-gray-500 dark:text-gray-400 flex bg-white dark:bg-gray-900 items-center justify-center pl-10 rounded-lg border border-gray-200 dark:border-gray-700 h-full placeholder:text-gray-500 dark:placeholder:text-gray-400 px-4 text-sm font-normal leading-normal focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                                placeholder="Search by Name, Employee ID, or Branch..."
+                                                value={searchQuery}
+                                                onChange={(e) => setSearchQuery(e.target.value)}
                                             />
-                                        </th>
-                                        {headers.map(header => {
-                                            let displayHeader = header;
-                                            if (header.toLowerCase() === 'photo' || header.toLowerCase() === 'photo (upload)') {
-                                                displayHeader = 'Image';
-                                            }
-                                            return <th key={header} className="px-6 py-3">{displayHeader}</th>;
-                                        })}
-                                        <th className="px-6 py-3">Status</th>
-                                        <th className="px-6 py-3 text-right">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {filteredData.map(({ row, index: i }) => {
-                                        return (
-                                            <tr key={i} className={`border-b dark:border-gray-700 ${selectedRows.has(i) ? 'bg-gray-100 dark:bg-gray-900' : 'hover:bg-gray-50 dark:hover:bg-gray-900/30'}`}>
-                                                <td className="px-6 py-4">
+                                        </label>
+                                    </div>
+                                    <div className="flex gap-2 overflow-x-auto w-full md:w-auto pb-2 md:pb-0 items-center">
+                                        <button
+                                            className={`flex h-8 shrink-0 items-center justify-center gap-x-2 rounded-full px-4 text-sm font-medium transition-colors ${!filterAvailableOnly ? 'bg-primary text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}`}
+                                            onClick={() => setFilterAvailableOnly(false)}
+                                        >
+                                            All <span className={`ml-1 text-xs rounded-full px-1.5 py-0.5 ${!filterAvailableOnly ? 'bg-white/20 text-white' : 'bg-gray-200 dark:bg-gray-600'}`}>{csvData.length}</span>
+                                        </button>
+                                        <button
+                                            onClick={() => setFilterAvailableOnly(true)}
+                                            className={`flex h-8 shrink-0 items-center justify-center gap-x-2 rounded-full px-4 text-sm font-medium transition-colors ${filterAvailableOnly ? 'bg-primary text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}`}
+                                        >
+                                            <span className="material-symbols-outlined text-[18px]">check_circle</span>
+                                            Available
+                                        </button>
+                                        <button
+                                            className="flex h-8 shrink-0 items-center justify-center gap-x-2 rounded-full px-4 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 text-sm font-medium transition-colors"
+                                        >
+                                            Pending
+                                        </button>
+                                        <button
+                                            className="flex h-8 shrink-0 items-center justify-center gap-x-2 rounded-full px-4 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 text-sm font-medium transition-colors"
+                                        >
+                                            Approved
+                                        </button>
+                                        <button
+                                            className="flex h-8 shrink-0 items-center justify-center gap-x-2 rounded-full px-4 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 text-sm font-medium transition-colors"
+                                        >
+                                            Printed
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-sm text-left text-gray-500 dark:text-gray-400">
+                                        <thead className="text-xs text-gray-700 dark:text-gray-300 uppercase bg-gray-50 dark:bg-gray-800">
+                                            <tr>
+                                                <th className="px-6 py-3">
                                                     <input
                                                         type="checkbox"
-                                                        checked={selectedRows.has(i)}
-                                                        onChange={() => handleRowCheckboxChange(i)}
+                                                        checked={selectedRows.size > 0 && selectedRows.size === filteredData.length}
+                                                        ref={input => {
+                                                            if (input) {
+                                                                input.indeterminate = selectedRows.size > 0 && selectedRows.size < filteredData.length;
+                                                            }
+                                                        }}
+                                                        onChange={(e) => handleSelectAll(e.target.checked)}
                                                     />
-                                                </td>
-                                                {row.map((cell, j) => {
-                                                    if (j === photoColumnIndex) {
-                                                        if (typeof cell === 'string') {
-                                                            if (cell.startsWith('blob:')) {
-                                                                // Legacy blob URL in cell - show placeholder
+                                                </th>
+                                                {headers.map(header => {
+                                                    let displayHeader = header;
+                                                    if (header.toLowerCase() === 'photo' || header.toLowerCase() === 'photo (upload)') {
+                                                        displayHeader = 'Image';
+                                                    }
+                                                    return <th key={header} className="px-6 py-3">{displayHeader}</th>;
+                                                })}
+                                                <th className="px-6 py-3">Status</th>
+                                                <th className="px-6 py-3 text-right">Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {filteredData.map(({ row, index: i }) => {
+                                                return (
+                                                    <tr key={i} className={`border-b dark:border-gray-700 ${selectedRows.has(i) ? 'bg-gray-100 dark:bg-gray-900' : 'hover:bg-gray-50 dark:hover:bg-gray-900/30'}`}>
+                                                        <td className="px-6 py-4">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={selectedRows.has(i)}
+                                                                onChange={() => handleRowCheckboxChange(i)}
+                                                            />
+                                                        </td>
+                                                        {row.map((cell, j) => {
+                                                            if (j === photoColumnIndex) {
+                                                                if (typeof cell === 'string') {
+                                                                    if (cell.startsWith('blob:')) {
+                                                                        // Legacy blob URL in cell - show placeholder
+                                                                        return (
+                                                                            <td key={j} className="px-6 py-4">
+                                                                                <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-xs text-gray-500">
+                                                                                    -
+                                                                                </div>
+                                                                            </td>
+                                                                        );
+                                                                    } else if (cell.startsWith('http') || cell.startsWith('data:')) {
+                                                                        return (
+                                                                            <td key={j} className="px-6 py-4">
+                                                                                <img
+                                                                                    src={cell}
+                                                                                    alt="ID Card"
+                                                                                    className="w-10 h-10 rounded-full border border-gray-200 object-cover"
+                                                                                    title="Employee Photo"
+                                                                                    onError={(e) => {
+                                                                                        (e.target as HTMLImageElement).style.display = 'none';
+                                                                                    }}
+                                                                                />
+                                                                            </td>
+                                                                        );
+                                                                    }
+                                                                }
                                                                 return (
                                                                     <td key={j} className="px-6 py-4">
                                                                         <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-xs text-gray-500">
@@ -1068,112 +1281,89 @@ const ImportManagement = () => {
                                                                         </div>
                                                                     </td>
                                                                 );
-                                                            } else if (cell.startsWith('http') || cell.startsWith('data:')) {
-                                                                return (
-                                                                    <td key={j} className="px-6 py-4">
-                                                                        <img
-                                                                            src={cell}
-                                                                            alt="ID Card"
-                                                                            className="w-10 h-10 rounded-full border border-gray-200 object-cover"
-                                                                            title="Employee Photo"
-                                                                            onError={(e) => {
-                                                                                (e.target as HTMLImageElement).style.display = 'none';
-                                                                            }}
-                                                                        />
-                                                                    </td>
-                                                                );
                                                             }
-                                                        }
-                                                        return (
-                                                            <td key={j} className="px-6 py-4">
-                                                                <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-xs text-gray-500">
-                                                                    -
-                                                                </div>
-                                                            </td>
-                                                        );
-                                                    }
-                                                    return <td key={j} className="px-6 py-4">{cell}</td>;
-                                                })}
-                                                <td className="px-6 py-4">
-                                                    {cardPrintStatuses[i] === 'ready_to_collect' ? (
-                                                        <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
-                                                            Ready to Collect
-                                                        </span>
-                                                    ) : cardPrintStatuses[i] === 'printed' ? (
-                                                        <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400">
-                                                            Printed
-                                                        </span>
-                                                    ) : cardPrintStatuses[i] === 'sent_for_printing' ? (
-                                                        <span className="px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400">
-                                                            Sent to Print
-                                                        </span>
-                                                    ) : isZipAvailable(i) ? (
-                                                        <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
-                                                            Available
-                                                        </span>
-                                                    ) : (
-                                                        <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400">
-                                                            Pending
-                                                        </span>
-                                                    )}
-                                                </td>
-                                                <td className="px-6 py-4 text-right">
-                                                    <div className="flex items-center justify-end gap-2">
-                                                        <button
-                                                            onClick={() => handleViewCard(row, i)}
-                                                            className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 text-blue-600 dark:text-blue-400"
-                                                            title="View Card"
-                                                        >
-                                                            <span className="material-symbols-outlined text-base">visibility</span>
-                                                        </button>
-                                                        <button
-                                                            onClick={() => handleEdit(row, i)}
-                                                            className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400"
-                                                            title="Edit"
-                                                        >
-                                                            <span className="material-symbols-outlined text-base">edit</span>
-                                                        </button>
-                                                        {isZipAvailable(i) && (
-                                                            <button
-                                                                onClick={() => handleDownload(row, i)}
-                                                                className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 text-primary"
-                                                                title="Download ZIP"
-                                                            >
-                                                                <span className="material-symbols-outlined text-base">download</span>
-                                                            </button>
-                                                        )}
-                                                        {cardIds[i] && cardPrintStatuses[i] === 'printed' && (
-                                                            <button
-                                                                onClick={() => handleMarkAsDone(i)}
-                                                                className="p-2 rounded-full hover:bg-green-100 dark:hover:bg-green-900/30 text-green-600 dark:text-green-400 flex items-center gap-1"
-                                                                title="Mark as Ready to Collect"
-                                                            >
-                                                                <Box size={16} />
-                                                            </button>
-                                                        )}
-                                                        <button
-                                                            onClick={() => handleDeleteRow(i)}
-                                                            className="p-2 rounded-full hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500"
-                                                            title="Delete"
-                                                        >
-                                                            <span className="material-symbols-outlined text-base">delete</span>
-                                                        </button>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
+                                                            return <td key={j} className="px-6 py-4">{cell}</td>;
+                                                        })}
+                                                        <td className="px-6 py-4">
+                                                            {cardPrintStatuses[i] === 'ready_to_collect' ? (
+                                                                <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
+                                                                    Ready to Collect
+                                                                </span>
+                                                            ) : cardPrintStatuses[i] === 'printed' ? (
+                                                                <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400">
+                                                                    Printed
+                                                                </span>
+                                                            ) : cardPrintStatuses[i] === 'sent_for_printing' ? (
+                                                                <span className="px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400">
+                                                                    Sent to Print
+                                                                </span>
+                                                            ) : isZipAvailable(i) ? (
+                                                                <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
+                                                                    Available
+                                                                </span>
+                                                            ) : (
+                                                                <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400">
+                                                                    Pending
+                                                                </span>
+                                                            )}
+                                                        </td>
+                                                        <td className="px-6 py-4 text-right">
+                                                            <div className="flex items-center justify-end gap-2">
+                                                                <button
+                                                                    onClick={() => handleViewCard(row, i)}
+                                                                    className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 text-blue-600 dark:text-blue-400"
+                                                                    title="View Card"
+                                                                >
+                                                                    <span className="material-symbols-outlined text-base">visibility</span>
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => handleEdit(row, i)}
+                                                                    className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400"
+                                                                    title="Edit"
+                                                                >
+                                                                    <span className="material-symbols-outlined text-base">edit</span>
+                                                                </button>
+                                                                {isZipAvailable(i) && (
+                                                                    <button
+                                                                        onClick={() => handleDownload(row, i)}
+                                                                        className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 text-primary"
+                                                                        title="Download ZIP"
+                                                                    >
+                                                                        <span className="material-symbols-outlined text-base">download</span>
+                                                                    </button>
+                                                                )}
+                                                                {cardIds[i] && cardPrintStatuses[i] === 'printed' && (
+                                                                    <button
+                                                                        onClick={() => handleMarkAsDone(i)}
+                                                                        className="p-2 rounded-full hover:bg-green-100 dark:hover:bg-green-900/30 text-green-600 dark:text-green-400 flex items-center gap-1"
+                                                                        title="Mark as Ready to Collect"
+                                                                    >
+                                                                        <Box size={16} />
+                                                                    </button>
+                                                                )}
+                                                                <button
+                                                                    onClick={() => handleDeleteRow(i)}
+                                                                    className="p-2 rounded-full hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500"
+                                                                    title="Delete"
+                                                                >
+                                                                    <span className="material-symbols-outlined text-base">delete</span>
+                                                                </button>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                            <div className="flex justify-end gap-4">
+                                <button className="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-10 px-4 bg-gray-200 text-gray-800 text-sm font-bold leading-normal" onClick={() => navigate(-1)}>
+                                    Back
+                                </button>
+                            </div>
+
                         </div>
-                        </div>
-                        <div className="flex justify-end gap-4">
-                            <button className="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-10 px-4 bg-gray-200 text-gray-800 text-sm font-bold leading-normal" onClick={() => navigate(-1)}>
-                                Back
-                            </button>
-                        </div>
-                
-                    </div>
                     </div>
                 </main>
             </div>
@@ -1248,8 +1438,8 @@ const ImportManagement = () => {
                 <ViewRequestModal
                     request={viewingRequest}
                     onClose={() => setViewingRequest(null)}
-                    onApprove={() => {}}
-                    onReject={() => {}}
+                    onApprove={() => { }}
+                    onReject={() => { }}
                     isVendorView={false}
                 />
             )}

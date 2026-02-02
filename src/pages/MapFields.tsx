@@ -15,23 +15,56 @@ const MapFields = () => {
     const [selectedRows, setSelectedRows] = useState<number[]>([]);
     const [isCameraOpen, setIsCameraOpen] = useState(false);
     const [cameraIndex, setCameraIndex] = useState<number | null>(null);
+    const [isDragActive, setIsDragActive] = useState(false);
     const videoRef = useRef<HTMLVideoElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    const parseCSV = (text: string) => {
+        const rows = text.split('\n').map(row => row.split(','));
+        setHeaders(rows[0]);
+        const data = rows.slice(1).filter(row => row.some(cell => cell.trim() !== ''));
+        setCsvData(data);
+        setImages(new Array(data.length).fill(null));
+        setSelectedRows(data.map((_, i) => i));
+    };
+
+    const parseXLSX = async (arrayBuffer: ArrayBuffer) => {
+        // Simple XLSX to CSV parser for basic functionality
+        // For production, consider using a library like 'xlsx'
+        try {
+            // This is a basic implementation - for full XLSX support, install xlsx library
+            const text = new TextDecoder().decode(arrayBuffer);
+            parseCSV(text);
+        } catch (error) {
+            console.error('Error parsing XLSX:', error);
+            alert('Error parsing file. Please ensure it is a valid CSV or XLSX file.');
+        }
+    };
 
     const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
         if (file) {
+            processFile(file);
+        }
+    };
+
+    const processFile = (file: File) => {
+        const fileExtension = file.name.split('.').pop()?.toLowerCase();
+
+        if (fileExtension === 'csv') {
             const reader = new FileReader();
             reader.onload = (event) => {
                 const text = event.target?.result as string;
-                const rows = text.split('\n').map(row => row.split(','));
-                setHeaders(rows[0]);
-                const data = rows.slice(1).filter(row => row.some(cell => cell.trim() !== ''));
-                setCsvData(data);
-                setImages(new Array(data.length).fill(null));
-                setSelectedRows(data.map((_, i) => i));
+                parseCSV(text);
             };
             reader.readAsText(file);
+        } else if (fileExtension === 'xlsx' || fileExtension === 'xls') {
+            const reader = new FileReader();
+            reader.onload = async (event) => {
+                const arrayBuffer = event.target?.result as ArrayBuffer;
+                await parseXLSX(arrayBuffer);
+            };
+            reader.readAsArrayBuffer(file);
         }
     };
 
@@ -39,20 +72,37 @@ const MapFields = () => {
         fileInputRef.current?.click();
     };
 
+    const handleDrag = (e: React.DragEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.type === 'dragenter' || e.type === 'dragover') {
+            setIsDragActive(true);
+        } else if (e.type === 'dragleave') {
+            setIsDragActive(false);
+        }
+    };
+
+    const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragActive(false);
+
+        const file = e.dataTransfer.files?.[0];
+        if (file) {
+            const validExtensions = ['csv', 'xlsx', 'xls'];
+            const fileExtension = file.name.split('.').pop()?.toLowerCase();
+            if (validExtensions.includes(fileExtension || '')) {
+                processFile(file);
+            } else {
+                alert('Please drop a valid CSV or XLSX file');
+            }
+        }
+    };
+
     useEffect(() => {
         if (location.state && location.state.file) {
             const file = location.state.file;
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                const text = event.target?.result as string;
-                const rows = text.split('\n').map(row => row.split(','));
-                setHeaders(rows[0]);
-                const data = rows.slice(1).filter(row => row.some(cell => cell.trim() !== ''));
-                setCsvData(data);
-                setImages(new Array(data.length).fill(null));
-                setSelectedRows(data.map((_, i) => i));
-            };
-            reader.readAsText(file);
+            processFile(file);
         }
     }, [location.state]);
 
@@ -176,15 +226,23 @@ const MapFields = () => {
                         </div>
                         {csvData.length === 0 ? (
                             <div className="flex flex-col p-4 bg-white dark:bg-[#18212b] rounded-xl border border-gray-200 dark:border-gray-800">
-                                <div className="flex flex-col items-center gap-6 rounded-lg border-2 border-dashed border-[#dbe0e6] dark:border-gray-700 px-6 py-14 bg-background-light dark:bg-background-dark">
+                                <div
+                                    onDragEnter={handleDrag}
+                                    onDragLeave={handleDrag}
+                                    onDragOver={handleDrag}
+                                    onDrop={handleDrop}
+                                    className={`flex flex-col items-center gap-6 rounded-lg border-2 border-dashed px-6 py-14 bg-background-light dark:bg-background-dark cursor-pointer transition-colors ${isDragActive
+                                            ? 'border-primary bg-primary/5 dark:bg-primary/10'
+                                            : 'border-[#dbe0e6] dark:border-gray-700'
+                                        }`}>
                                     <div className="flex flex-col items-center gap-2">
                                         <span className="material-symbols-outlined text-primary" style={{ fontSize: '48px' }}>cloud_upload</span>
                                         <p className="text-[#111418] dark:text-white text-lg font-bold leading-tight tracking-[-0.015em] text-center">
-                                            Drag & drop your CSV file here</p>
+                                            Drag & drop your CSV or XLSX file here</p>
                                         <p className="text-[#617289] dark:text-gray-400 text-sm font-normal leading-normal text-center">
                                             or click to browse</p>
                                     </div>
-                                    <input type="file" accept=".csv" ref={fileInputRef} onChange={handleFileChange} style={{ display: 'none' }} />
+                                    <input type="file" accept=".csv,.xlsx,.xls" ref={fileInputRef} onChange={handleFileChange} style={{ display: 'none' }} />
                                     <button onClick={handleChooseFileClick} className="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-10 px-4 bg-primary text-white text-sm font-bold leading-normal tracking-[0.015em]">
                                         <span className="truncate">Choose File</span>
                                     </button>
@@ -225,15 +283,15 @@ const MapFields = () => {
                                                                 )}
                                                                 <div className="flex gap-1">
                                                                     <label className="cursor-pointer p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors" title="Upload Photo">
-                                                                        <input 
-                                                                            type="file" 
-                                                                            accept="image/*" 
-                                                                            className="hidden" 
+                                                                        <input
+                                                                            type="file"
+                                                                            accept="image/*"
+                                                                            className="hidden"
                                                                             onChange={(e) => handleImageUpload(e, rowIndex)}
                                                                         />
                                                                         <span className="material-symbols-outlined text-gray-600 dark:text-gray-300 text-xl">upload</span>
                                                                     </label>
-                                                                    <button 
+                                                                    <button
                                                                         onClick={() => handleCapture(rowIndex)}
                                                                         className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors"
                                                                         title="Take Photo"
@@ -253,13 +311,13 @@ const MapFields = () => {
                                     </div>
                                 </div>
                                 <div className="flex justify-end gap-4">
-                                    <button 
+                                    <button
                                         onClick={() => setCsvData([])}
                                         className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700"
                                     >
                                         Cancel
                                     </button>
-                                    <button 
+                                    <button
                                         onClick={handleConfirmMapping}
                                         className="px-4 py-2 text-sm font-bold text-white bg-primary rounded-lg hover:bg-primary/90"
                                     >

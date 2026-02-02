@@ -1,5 +1,5 @@
 import React from 'react';
-import { Download, FileText, RefreshCcw, Printer, Image, Archive, FileType } from 'lucide-react';
+import { Download, FileText, RefreshCcw, Printer, Image, Archive, FileType, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Employee } from '@/types/employee';
@@ -18,6 +18,7 @@ interface ActionButtonsProps {
   onDownloadPDF: () => void;
   onDownloadZip: () => void;
   onReset: () => void;
+  onSave?: () => void;
   isPhotoUploaded: boolean;
   setIsSidebarOpen: (isOpen: boolean) => void;
 }
@@ -29,6 +30,7 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
   onDownloadPDF,
   onDownloadZip,
   onReset,
+  onSave,
   isPhotoUploaded,
   setIsSidebarOpen
 }) => {
@@ -60,7 +62,7 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
     <Card className="p-6">
       <h2 className="text-xl font-semibold text-dark-grey mb-6">Actions</h2>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 gap-3">
         <Button
           onClick={onPrint}
           className="bg-primary hover:bg-primary/90 text-white w-full"
@@ -95,6 +97,15 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        <Button
+          onClick={onSave}
+          className="bg-green-600 hover:bg-green-700 text-white w-full"
+          disabled={!employee.fullName || !employee.employeeId}
+        >
+          <Save className="w-4 h-4 mr-2" />
+          Save Details
+        </Button>
 
         <Button
           onClick={handleReset}

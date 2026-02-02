@@ -28,20 +28,20 @@ const RoleSelectionDialog: React.FC<RoleSelectionDialogProps> = ({ isOpen, onClo
                         You have administrative privileges. Please choose which dashboard you would like to proceed to.
                     </AlertDialogDescription>
                 </AlertDialogHeader>
-                <AlertDialogFooter className="flex flex-col sm:flex-row gap-2">
-                    <AlertDialogCancel onClick={onClose}>
+                <AlertDialogFooter className="flex flex-col sm:flex-row gap-3 sm:justify-end">
+                    <AlertDialogCancel onClick={onClose} className="sm:mr-auto">
                         Cancel
                     </AlertDialogCancel>
-                    <Button 
+                    <Button
                         variant="secondary"
                         onClick={onUserRedirect}
-                        className="mt-2 sm:mt-0"
+                        className="w-full sm:w-auto"
                     >
                         User Dashboard
                     </Button>
-                    <AlertDialogAction 
+                    <AlertDialogAction
                         onClick={onAdminRedirect}
-                        className="mt-2 sm:mt-0"
+                        className="w-full sm:w-auto"
                     >
                         Admin Dashboard
                     </AlertDialogAction>

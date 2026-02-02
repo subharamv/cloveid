@@ -3,6 +3,7 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import logo from '../assets/CLOVE LOGO BLACK.png';
 import ViewRequestModal from '../components/ViewRequestModal';
 import { useAuth } from '../hooks/useAuth';
+import { useBranches } from '../hooks/useBranches';
 import { supabase } from '@/lib/supabaseClient';
 import { HiddenCardRenderer } from '../components/HiddenCardRenderer';
 import { useDownloadZip } from '../hooks/useDownloadZip';
@@ -31,6 +32,7 @@ interface Request {
     date: string;
     status: string;
     photo: string;
+    photo_url?: string;
     bloodGroup: string;
     branch: string;
     emergencyContact: string;
@@ -40,12 +42,14 @@ interface Request {
     is_edited?: boolean;
     print_status?: string;
     type?: 'individual' | 'bulk';
+    sourceTable?: 'requests' | 'card_details';
 }
 
 const ManageRequests = () => {
     const { logout } = useAuth();
     const navigate = useNavigate();
     const location = useLocation();
+    const { branches } = useBranches();
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [selectedRequests, setSelectedRequests] = useState<number[]>([]);
     const [viewingRequest, setViewingRequest] = useState<Request | null>(null);
@@ -113,16 +117,26 @@ const ManageRequests = () => {
     };
 
     const fetchRequests = async () => {
-        // Fetch from requests table - only individual employee requests (exclude batch requests)
-        const { data: individualRequests, error: requestsError } = await supabase
-            .from('requests')
-            .select('*, is_edited, batch_id')
-            .is('batch_id', null)
-            .order('created_at', { ascending: false });
+        // Fetch from both requests and card_details tables
+        const [requestsRes, cardDetailsRes] = await Promise.all([
+            supabase
+                .from('requests')
+                .select('*, is_edited, batch_id')
+                .is('batch_id', null)
+                .order('created_at', { ascending: false }),
+            supabase
+                .from('card_details')
+                .select('*')
+                .order('created_at', { ascending: false })
+        ]);
 
-        if (requestsError) console.error('Error fetching requests:', requestsError);
+        if (requestsRes.error) console.error('Error fetching requests:', requestsRes.error);
+        if (cardDetailsRes.error) console.error('Error fetching card_details:', cardDetailsRes.error);
 
-        const formattedIndividual = (individualRequests || []).map(req => ({
+        const individualRequests = requestsRes.data || [];
+        const cardDetails = cardDetailsRes.data || [];
+
+        const formattedIndividual = individualRequests.map(req => ({
             id: req.id,
             name: req.full_name,
             employeeId: req.employee_id,
@@ -131,15 +145,38 @@ const ManageRequests = () => {
             is_edited: req.is_edited,
             batch_id: req.batch_id,
             photo: req.photo_url,
+            photo_url: req.photo_url,
             bloodGroup: req.blood_group,
             branch: req.branch,
             emergencyContact: req.emergency_contact,
             created_at: req.created_at,
             print_status: req.print_status || 'not_printed',
-            type: 'individual'
+            type: 'individual',
+            sourceTable: 'requests'
         }));
 
-        setRequests(formattedIndividual);
+        const formattedCardDetails = cardDetails.map(req => ({
+            id: req.id,
+            name: req.full_name,
+            employeeId: req.employee_id,
+            date: new Date(req.created_at).toLocaleDateString(),
+            status: req.status,
+            is_edited: req.is_edited,
+            batch_id: null,
+            photo: req.photo_url,
+            photo_url: req.photo_url,
+            bloodGroup: req.blood_group,
+            branch: req.branch,
+            emergencyContact: req.emergency_contact,
+            created_at: req.created_at,
+            print_status: req.print_status || 'not_printed',
+            type: 'individual',
+            sourceTable: 'card_details'
+        }));
+
+        setRequests([...formattedIndividual, ...formattedCardDetails].sort((a, b) =>
+            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        ));
     };
 
 
@@ -193,11 +230,29 @@ const ManageRequests = () => {
         setProcessingRequest(request);
 
         // Wait for the hidden card to render
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise(resolve => setTimeout(resolve, 300));
+
+        const waitForImages = async (root: HTMLElement, timeoutMs = 5000) => {
+            const imgs = Array.from(root.querySelectorAll('img')) as HTMLImageElement[];
+            if (imgs.length === 0) return;
+            await Promise.race([
+                Promise.all(imgs.map(img => new Promise<void>((res) => {
+                    if (img.complete && img.naturalWidth > 0) return res();
+                    const onLoad = () => { cleanup(); res(); };
+                    const onError = () => { cleanup(); res(); };
+                    const cleanup = () => { img.removeEventListener('load', onLoad); img.removeEventListener('error', onError); };
+                    img.addEventListener('load', onLoad);
+                    img.addEventListener('error', onError);
+                }))),
+                new Promise(res => setTimeout(res, timeoutMs))
+            ]);
+        };
 
         try {
             const cardElement = document.getElementById(`id-card-${request.id}`);
             if (cardElement) {
+                // ensure images are loaded into the DOM before canvas capture
+                await waitForImages(cardElement, 3000);
                 const zip = new JSZip();
                 const frontImage = await html2canvas(cardElement.querySelector('.id-card-front') as HTMLElement, {
                     useCORS: true,
@@ -235,6 +290,26 @@ const ManageRequests = () => {
                 link.href = URL.createObjectURL(zipBlob);
                 link.download = `${request.name}-id-card.zip`;
                 link.click();
+
+                // Update request status to "Printed" and print_status to "printed" after successful download
+                const table = request.sourceTable === 'card_details' ? 'card_details' : 'requests';
+                const { error: updateError } = await supabase
+                    .from(table)
+                    .update({ status: 'Printed', print_status: 'printed' })
+                    .eq('id', request.id);
+
+                if (updateError) {
+                    console.error('Error updating request status to Printed:', updateError);
+                    toast.error('Card downloaded but failed to update status.');
+                } else {
+                    // Update local state
+                    setRequests(requests.map(req =>
+                        req.id === request.id
+                            ? { ...req, status: 'Printed', print_status: 'printed' }
+                            : req
+                    ));
+                    toast.success('Card downloaded and status updated to Printed.');
+                }
             } else {
                 toast.error('Could not find card element to download.');
             }
@@ -253,16 +328,34 @@ const ManageRequests = () => {
         const { jsPDF } = await import('jspdf');
 
         const requestsToDownload = requests.filter(r => selectedRequests.includes(r.id));
+        const requestsToUpdate: Request[] = [];
 
         for (const request of requestsToDownload) {
             setProcessingRequest(request);
 
             // Wait for the hidden card to render
-            await new Promise(resolve => setTimeout(resolve, 500));
+            await new Promise(resolve => setTimeout(resolve, 300));
+
+            const waitForImages = async (root: HTMLElement, timeoutMs = 5000) => {
+                const imgs = Array.from(root.querySelectorAll('img')) as HTMLImageElement[];
+                if (imgs.length === 0) return;
+                await Promise.race([
+                    Promise.all(imgs.map(img => new Promise<void>((res) => {
+                        if (img.complete && img.naturalWidth > 0) return res();
+                        const onLoad = () => { cleanup(); res(); };
+                        const onError = () => { cleanup(); res(); };
+                        const cleanup = () => { img.removeEventListener('load', onLoad); img.removeEventListener('error', onError); };
+                        img.addEventListener('load', onLoad);
+                        img.addEventListener('error', onError);
+                    }))),
+                    new Promise(res => setTimeout(res, timeoutMs))
+                ]);
+            };
 
             try {
                 const cardElement = document.getElementById(`id-card-${request.id}`);
                 if (cardElement) {
+                    await waitForImages(cardElement, 3000);
                     const frontImage = await html2canvas(cardElement.querySelector('.id-card-front') as HTMLElement, {
                         useCORS: true,
                         allowTaint: true,
@@ -294,6 +387,9 @@ const ManageRequests = () => {
 
                         const pdfBlob = pdf.output('blob');
                         folder.file(`${request.name}-id-card.pdf`, pdfBlob);
+
+                        // Track all requests for status update
+                        requestsToUpdate.push(request);
                     }
                 }
             } catch (error) {
@@ -309,7 +405,31 @@ const ManageRequests = () => {
                 link.href = URL.createObjectURL(zipBlob);
                 link.download = 'id-cards-batch.zip';
                 link.click();
-                toast.success('Batch download started.');
+
+                // Update statuses to "Printed" for all downloaded requests with "Sent for Print" status
+                if (requestsToUpdate.length > 0) {
+                    for (const request of requestsToUpdate) {
+                        const table = request.sourceTable === 'card_details' ? 'card_details' : 'requests';
+                        const { error: updateError } = await supabase
+                            .from(table)
+                            .update({ status: 'Printed', print_status: 'printed' })
+                            .eq('id', request.id);
+
+                        if (updateError) {
+                            console.error(`Error updating request ${request.id} status:`, updateError);
+                        }
+                    }
+
+                    // Update local state
+                    setRequests(requests.map(req =>
+                        requestsToUpdate.some(u => u.id === req.id)
+                            ? { ...req, status: 'Printed', print_status: 'printed' }
+                            : req
+                    ));
+                    toast.success(`Batch downloaded and ${requestsToUpdate.length} card(s) status updated to Printed.`);
+                } else {
+                    toast.success('Batch download started.');
+                }
             } else {
                 toast.warning('No ID cards were processed for download.');
             }
@@ -380,8 +500,9 @@ const ManageRequests = () => {
                         // The vendor dashboard will use HiddenCardRenderer as fallback
                     }
 
-                    recordsToInsert.push({
-                        request_id: reqId,
+                    // Determine which table the request came from
+                    const sourceTable = request.sourceTable || 'requests';
+                    const vendorRequestRecord: any = {
                         vendor_id: selectedVendorId,
                         front_image_url: front_image_url || null,
                         back_image_url: back_image_url || null,
@@ -389,9 +510,18 @@ const ManageRequests = () => {
                         status: 'sent',
                         sent_at: new Date().toISOString(),
                         batch_id: request.batch_id || null,
-                    });
+                        source_table: sourceTable,
+                    };
 
-                    requestsToUpdate.push(reqId);
+                    // Add the appropriate ID based on source
+                    if (sourceTable === 'card_details') {
+                        vendorRequestRecord.card_details_id = reqId;
+                    } else {
+                        vendorRequestRecord.request_id = reqId;
+                    }
+
+                    recordsToInsert.push(vendorRequestRecord);
+                    requestsToUpdate.push({ id: reqId, sourceTable });
                 }
             } catch (error) {
                 console.error(`Error processing request ${request.id}:`, error);
@@ -408,14 +538,21 @@ const ManageRequests = () => {
                 console.error('Error creating vendor send records:', sendError);
                 toast.error('Failed to send requests to vendor.');
             } else {
-                // Update request statuses to 'Printed'
-                await supabase
-                    .from('requests')
-                    .update({ status: 'Printed' })
-                    .in('id', requestsToUpdate);
+                // Update request statuses to 'Sent for Print' and print_status to 'sent_for_printing' in the appropriate tables
+                for (const update of requestsToUpdate) {
+                    const table = update.sourceTable === 'card_details' ? 'card_details' : 'requests';
+                    await supabase
+                        .from(table)
+                        .update({ status: 'Sent for Print', print_status: 'sent_for_printing' })
+                        .eq('id', update.id);
+                }
 
                 toast.success('Requests sent to vendor successfully!');
-                setRequests(requests.map(req => requestsToUpdate.includes(req.id) ? { ...req, status: 'Printed' } : req));
+                setRequests(requests.map(req =>
+                    requestsToUpdate.some(u => u.id === req.id)
+                        ? { ...req, status: 'Sent for Print', print_status: 'sent_for_printing' }
+                        : req
+                ));
                 setSelectedRequests([]);
                 setIsVendorModalOpen(false);
                 setSelectedVendorId(null);
@@ -432,14 +569,44 @@ const ManageRequests = () => {
             return;
         }
 
-        const { error } = await supabase
-            .from('requests')
-            .delete()
-            .in('id', selectedRequests);
+        // Separate requests by source table
+        const requestIds = selectedRequests.filter(id => {
+            const req = requests.find(r => r.id === id);
+            return req && req.sourceTable !== 'card_details';
+        });
+        const cardDetailsIds = selectedRequests.filter(id => {
+            const req = requests.find(r => r.id === id);
+            return req && req.sourceTable === 'card_details';
+        });
 
-        if (error) {
-            toast.error('Error deleting requests.');
-            console.error('Error deleting requests:', error);
+        let hasError = false;
+
+        // Delete from requests table
+        if (requestIds.length > 0) {
+            const { error } = await supabase
+                .from('requests')
+                .delete()
+                .in('id', requestIds);
+            if (error) {
+                console.error('Error deleting from requests:', error);
+                hasError = true;
+            }
+        }
+
+        // Delete from card_details table
+        if (cardDetailsIds.length > 0) {
+            const { error } = await supabase
+                .from('card_details')
+                .delete()
+                .in('id', cardDetailsIds);
+            if (error) {
+                console.error('Error deleting from card_details:', error);
+                hasError = true;
+            }
+        }
+
+        if (hasError) {
+            toast.error('Error deleting some requests.');
         } else {
             toast.success('Selected requests have been deleted.');
             setRequests(requests.filter(req => !selectedRequests.includes(req.id)));
@@ -449,49 +616,129 @@ const ManageRequests = () => {
 
 
     const handleApprove = async (id: number) => {
+        const request = requests.find(r => r.id === id);
+        if (!request) {
+            console.error('Request not found');
+            return;
+        }
+
+        const tableName = request.sourceTable === 'card_details' ? 'card_details' : 'requests';
         const { data, error } = await supabase
-            .from('requests')
-            .update({ status: 'Approved' })
+            .from(tableName)
+            .update({
+                status: 'Approved',
+                updated_at: new Date().toISOString()
+            })
             .eq('id', id)
-            .select();
+            .select('*');
 
         if (error) {
             console.error('Error approving request:', error);
-        } else if (data) {
+            toast.error('Failed to approve request');
+        } else if (data && data.length > 0) {
+            toast.success('Request approved successfully');
             fetchRequests();
             setViewingRequest(null);
         }
     };
 
     const handleReject = async (id: number) => {
+        const request = requests.find(r => r.id === id);
+        if (!request) {
+            console.error('Request not found');
+            return;
+        }
+
+        const tableName = request.sourceTable === 'card_details' ? 'card_details' : 'requests';
         const { data, error } = await supabase
-            .from('requests')
-            .update({ status: 'Rejected' })
+            .from(tableName)
+            .update({
+                status: 'Rejected',
+                updated_at: new Date().toISOString()
+            })
             .eq('id', id)
-            .select();
+            .select('*');
 
         if (error) {
             console.error('Error rejecting request:', error);
-        } else if (data) {
+            toast.error('Failed to reject request');
+        } else if (data && data.length > 0) {
+            toast.success('Request rejected successfully');
             fetchRequests();
             setViewingRequest(null);
         }
     };
 
     const handleMarkAsDone = async (id: number) => {
+        const request = requests.find(r => r.id === id);
+        if (!request) {
+            toast.error('Request not found');
+            return;
+        }
+
+        const tableName = request.sourceTable === 'card_details' ? 'card_details' : 'requests';
         const { data, error } = await supabase
-            .from('requests')
-            .update({ print_status: 'ready_to_collect' })
+            .from(tableName)
+            .update({
+                print_status: 'ready_to_collect',
+                updated_at: new Date().toISOString()
+            })
             .eq('id', id)
-            .select();
+            .select('*');
 
         if (error) {
             console.error('Error marking as done:', error);
             toast.error('Failed to mark card as ready to collect');
-        } else if (data) {
+        } else if (data && data.length > 0) {
             toast.success('Card marked as ready to collect!');
             fetchRequests();
             setViewingRequest(null);
+        }
+    };
+
+    const handleCancelPrint = async (id: number) => {
+        const request = requests.find(r => r.id === id);
+        if (!request) {
+            toast.error('Request not found');
+            return;
+        }
+
+        try {
+            // Delete from vendor_requests table
+            const { error: vendorError } = await supabase
+                .from('vendor_requests')
+                .delete()
+                .eq('request_id', id);
+
+            if (vendorError) {
+                console.error('Error deleting vendor request:', vendorError);
+                toast.error('Failed to cancel print request');
+                return;
+            }
+
+            // Update status back to 'Approved' and reset print_status
+            const tableName = request.sourceTable === 'card_details' ? 'card_details' : 'requests';
+            const { data, error: updateError } = await supabase
+                .from(tableName)
+                .update({
+                    status: 'Approved',
+                    print_status: 'not_printed',
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', id)
+                .select('*');
+
+            if (updateError) {
+                console.error('Error updating request:', updateError);
+                toast.error('Failed to cancel print request');
+            } else if (data && data.length > 0) {
+                toast.success('Print request cancelled successfully!');
+                fetchRequests();
+                setViewingRequest(null);
+            }
+        } catch (error) {
+            console.error('Error cancelling print request:', error);
+            toast.error('Failed to cancel print request');
         }
     };
 
@@ -513,13 +760,19 @@ const ManageRequests = () => {
 
     const requestToEmployee = (request: Request) => {
         if (!request) return null;
+
+        // Find branch info to get address
+        const branchInfo = branches.find(b => b.name === request.branch);
+
         return {
             id: request.id,
             fullName: request.name,
             employeeId: request.employeeId,
             bloodGroup: request.bloodGroup,
             branch: request.branch,
-            photo: request.photo,
+            address: branchInfo?.address || request.branch || undefined, // Use branch address if found
+            photo: request.photo || request.photo_url,
+            photo_url: request.photo_url,
             emergencyContact: request.emergencyContact,
             countryCode: '+91',
             frontLogoDataUrl: frontLogoDataUrl,
@@ -541,51 +794,46 @@ const ManageRequests = () => {
                                 <div className="flex gap-2 overflow-x-auto pb-2">
                                     <button
                                         onClick={() => setStatusFilter('All')}
-                                        className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
-                                            statusFilter === 'All'
-                                                ? 'bg-orange-500 text-white'
-                                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                        }`}
+                                        className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${statusFilter === 'All'
+                                            ? 'bg-orange-500 text-white'
+                                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                            }`}
                                     >
                                         All
                                     </button>
                                     <button
                                         onClick={() => setStatusFilter('In Editing')}
-                                        className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
-                                            statusFilter === 'In Editing'
-                                                ? 'bg-orange-500 text-white'
-                                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                        }`}
+                                        className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${statusFilter === 'In Editing'
+                                            ? 'bg-orange-500 text-white'
+                                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                            }`}
                                     >
                                         Available
                                     </button>
                                     <button
                                         onClick={() => setStatusFilter('Pending')}
-                                        className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
-                                            statusFilter === 'Pending'
-                                                ? 'bg-orange-500 text-white'
-                                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                        }`}
+                                        className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${statusFilter === 'Pending'
+                                            ? 'bg-orange-500 text-white'
+                                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                            }`}
                                     >
                                         Pending
                                     </button>
                                     <button
                                         onClick={() => setStatusFilter('Approved')}
-                                        className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
-                                            statusFilter === 'Approved'
-                                                ? 'bg-orange-500 text-white'
-                                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                        }`}
+                                        className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${statusFilter === 'Approved'
+                                            ? 'bg-orange-500 text-white'
+                                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                            }`}
                                     >
                                         Approved
                                     </button>
                                     <button
                                         onClick={() => setStatusFilter('Printed')}
-                                        className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
-                                            statusFilter === 'Printed'
-                                                ? 'bg-orange-500 text-white'
-                                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                        }`}
+                                        className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${statusFilter === 'Printed'
+                                            ? 'bg-orange-500 text-white'
+                                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                            }`}
                                     >
                                         Printed
                                     </button>
@@ -695,7 +943,7 @@ const ManageRequests = () => {
                                                         </button>
 
                                                         <button
-                                                            onClick={() => navigate(`/edit-request/${request.id}`)}
+                                                            onClick={() => navigate(`/edit-request/${request.id}?table=${(request as any).sourceTable}`)}
                                                             className="p-1 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-white dark:hover:bg-gray-700"
                                                         >
                                                             <Pencil size={18} />
@@ -722,6 +970,13 @@ const ManageRequests = () => {
                                                                 <Box size={16} />
                                                                 Ready to Collect
                                                             </span>
+                                                        ) : request.status === "Sent for Print" ? (
+                                                            <button
+                                                                onClick={() => handleCancelPrint(request.id)}
+                                                                className="bg-yellow-500 text-white px-3 py-1 rounded-md hover:bg-yellow-600"
+                                                            >
+                                                                Cancel
+                                                            </button>
                                                         ) : (
                                                             <>
                                                                 <button
@@ -795,7 +1050,7 @@ const ManageRequests = () => {
                                                 </button>
 
                                                 <button
-                                                    onClick={() => navigate(`/edit-request/${request.id}`)}
+                                                    onClick={() => navigate(`/edit-request/${request.id}?table=${(request as any).sourceTable}`)}
                                                     className="p-2 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-white dark:hover:bg-gray-700"
                                                     title="Edit"
                                                 >
@@ -824,6 +1079,13 @@ const ManageRequests = () => {
                                                         <Box size={16} />
                                                         Ready to Collect
                                                     </span>
+                                                ) : request.status === "Sent for Print" ? (
+                                                    <button
+                                                        onClick={() => handleCancelPrint(request.id)}
+                                                        className="bg-yellow-500 text-white px-3 py-1 rounded-md hover:bg-yellow-600 text-sm"
+                                                    >
+                                                        Cancel
+                                                    </button>
                                                 ) : (
                                                     <>
                                                         <button

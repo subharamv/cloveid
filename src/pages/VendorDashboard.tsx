@@ -175,10 +175,10 @@ const VendorDashboard = () => {
         }
 
         setProcessingRequest(request);
-
-        // Wait for the hidden card to render
-        await new Promise(resolve => setTimeout(resolve, 500));
-
+        await supabase
+            .from('card_batches')
+            .update({ status: 'completed' })
+            .eq('batch_id', request.batch_id);
         try {
             const cardElement = document.getElementById(`id-card-${request.id}`);
             if (cardElement) {
@@ -244,13 +244,20 @@ const VendorDashboard = () => {
 
         if (updateError) console.error('Error updating vendor_requests status:', updateError);
 
-        // 2. Update individual request if it exists
+        // 2. Update individual request if it exists - set status to 'Printed' and print_status to 'printed'
         if (request.id && !request.batch_id) {
             const { error: requestUpdateError } = await supabase
                 .from('requests')
                 .update({ status: 'Printed', print_status: 'printed' })
                 .eq('id', request.id);
             if (requestUpdateError) console.error('Error updating request status:', requestUpdateError);
+        } else if (request.batch_id) {
+            // For requests from batch, update their status to 'Printed' through card_details
+            const { error: cardDetailsError } = await supabase
+                .from('card_details')
+                .update({ status: 'Printed', print_status: 'printed' })
+                .eq('batch_id', request.batch_id);
+            if (cardDetailsError) console.error('Error updating card_details status:', cardDetailsError);
         }
 
         // 3. Update bulk card if it belongs to a batch
@@ -289,7 +296,7 @@ const VendorDashboard = () => {
             if (!remainingCards || remainingCards.length === 0) {
                 await supabase
                     .from('card_batches')
-                    .update({ status: 'Printed' })
+                    .update({ status: 'completed' })
                     .eq('batch_id', request.batch_id);
             }
         }

@@ -125,244 +125,271 @@ const UserDashboardPage = () => {
                     ) : (
                         <>
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                        {/* Card 1: Raise New Card Request */}
-                        <div className="p-6 bg-white rounded-lg shadow-[0_0.5rem_1rem_rgba(0,0,0,.05)] flex flex-col items-center text-center">
-                            <CreditCard className="h-12 w-12 text-[#f48120] mb-4" />
-                            <h2 className="text-xl font-bold mb-2">Request an ID Card</h2>
-                            <p className="text-gray-600 mb-4">Lost your current card or need a replacement? Start a new request here.</p>
-                            <Link to="/employee-page" className="mt-auto w-full bg-[#f48120] text-white font-bold py-2 px-4 rounded-lg hover:bg-opacity-90 transition-colors">Start New Request</Link>
-                        </div>
-
-                        {/* Card 2: Track Status */}
-                        <div className="p-6 bg-white rounded-lg shadow-[0_0.5rem_1rem_rgba(0,0,0,.05)] flex flex-col items-center text-center">
-                            <List className="h-12 w-12 text-[#f48120] mb-4" />
-                            <h2 className="text-xl font-bold mb-2">View My Requests</h2>
-                            <p className="text-gray-600 mb-4">Track the live status, history, and details of all your ID card submissions.</p>
-                            <div className="mt-auto w-full">
-                                <div className="p-4 bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 rounded-md shadow-md">
-                                    <p>
-                                        <span className="font-bold">Latest Request Status:</span> <span className="font-semibold">{statusRequest ? statusRequest.status : 'No Requests'}</span>
-                                    </p>
+                                {/* Card 1: Raise New Card Request */}
+                                <div className="p-6 bg-white rounded-lg shadow-[0_0.5rem_1rem_rgba(0,0,0,.05)] flex flex-col items-center text-center">
+                                    <CreditCard className="h-12 w-12 text-[#f48120] mb-4" />
+                                    <h2 className="text-xl font-bold mb-2">Request an ID Card</h2>
+                                    <p className="text-gray-600 mb-4">Lost your current card or need a replacement? Start a new request here.</p>
+                                    <Link to="/employee-page" className="mt-auto w-full bg-[#f48120] text-white font-bold py-2 px-4 rounded-lg hover:bg-opacity-90 transition-colors">Start New Request</Link>
                                 </div>
-                            </div>
-                        </div>
 
-                        {/* Card 3: Settings */}
-                        <div className="p-6 bg-white rounded-lg shadow-[0_0.5rem_1rem_rgba(0,0,0,.05)] flex flex-col items-center text-center">
-                            <Settings className="h-12 w-12 text-[#f48120] mb-4" />
-                            <h2 className="text-xl font-bold mb-2">My ID Card Profile</h2>
-                            <div className="mb-4 text-sm text-gray-600">
-                                <p><span className="font-semibold">ID:</span> {profile?.employee_id || 'N/A'}</p>
-                                <p><span className="font-semibold">Dept:</span> {profile?.department || 'N/A'}</p>
-                            </div>
-                            <Link to="/profile" className="mt-auto w-full bg-gray-200 text-gray-800 font-bold py-2 px-4 rounded-lg hover:bg-gray-300 transition-colors">Manage Profile</Link>
-                        </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mt-10">
-                        <div className="lg:col-span-2">
-                            <div className="bg-white dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-800 p-6 sm:p-8">
-                                <h2 className="text-slate-900 dark:text-white text-[22px] font-bold leading-tight tracking-[-0.015em] mb-6">Track Your Request</h2>
-                                {statusRequest ? (
-                                    <>
-                                        <div className="flex justify-between items-center mb-6">
-                                            <p className="text-sm text-gray-600 dark:text-gray-400">
-                                                Tracking status for Request ID: <span className="font-bold text-[#f48120]">#{statusRequest.id}</span> ({statusRequest.name})
+                                {/* Card 2: Track Status */}
+                                <div className="p-6 bg-white rounded-lg shadow-[0_0.5rem_1rem_rgba(0,0,0,.05)] flex flex-col items-center text-center">
+                                    <List className="h-12 w-12 text-[#f48120] mb-4" />
+                                    <h2 className="text-xl font-bold mb-2">View My Requests</h2>
+                                    <p className="text-gray-600 mb-4">Track the live status, history, and details of all your ID card submissions.</p>
+                                    <div className="mt-auto w-full">
+                                        <div className="p-4 bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 rounded-md shadow-md">
+                                            <p>
+                                                <span className="font-bold">Latest Request Status:</span> <span className="font-semibold">{statusRequest ? statusRequest.status : 'No Requests'}</span>
                                             </p>
-                                            <span className={`px-3 py-1 rounded-full text-xs font-bold ${statusRequest.status === 'Ready to Collect' ? 'bg-green-100 text-green-700' :
-                                                statusRequest.status === 'Ready for Pickup' ? 'bg-green-100 text-green-700' :
-                                                    statusRequest.status === 'Rejected' ? 'bg-red-100 text-red-700' :
-                                                        statusRequest.status === 'Printed' ? 'bg-blue-100 text-blue-700' :
-                                                            'bg-yellow-100 text-yellow-700'
-                                                }`}>
-                                                {statusRequest.status}
-                                            </span>
                                         </div>
+                                    </div>
+                                </div>
 
-                                        {statusRequest.status === 'Rejected' ? (
-                                            <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-4 mb-6">
-                                                <div className="bg-red-100 p-2 rounded-full">
-                                                    <XCircle className="h-6 w-6 text-red-600" />
-                                                </div>
-                                                <div>
-                                                    <h3 className="font-bold text-red-800">Request Rejected</h3>
-                                                    <p className="text-sm text-red-700">Your request has been rejected. Please contact the administrator for more details or raise a new request with corrected information.</p>
-                                                </div>
-                                            </div>
-                                        ) : null}
-
-                                        {/* Horizontal view for larger screens */}
-                                        <div className="hidden sm:flex justify-between items-start pt-4">
-                                            <div className={`flex flex-col items-center text-center`}>
-                                                <span className={`flex items-center justify-center w-8 h-8 rounded-full ring-4 ring-white dark:ring-slate-900/50 bg-green-100 dark:bg-green-900`}>
-                                                    <span className={`material-symbols-outlined text-sm text-green-600 dark:text-green-400`}>check</span>
-                                                </span>
-                                                <h3 className="mt-2 text-base font-semibold text-slate-900 dark:text-white">Submitted</h3>
-                                                <time className="text-sm text-slate-400 dark:text-slate-500">{statusRequest.date}</time>
-                                            </div>
-
-                                            <div className={`flex-1 h-px mt-4 ${['In Review', 'Approved', 'Printed', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-500' : 'bg-slate-200 dark:bg-slate-700'} mx-4`}></div>
-
-                                            <div className={`flex flex-col items-center text-center ${['Pending', 'In Review', 'Approved', 'Printed', 'Ready for Pickup'].includes(statusRequest.status) ? '' : 'opacity-50'}`}>
-                                                <span className={`flex items-center justify-center w-8 h-8 rounded-full ring-4 ring-white dark:ring-slate-900/50 ${['Pending', 'In Review'].includes(statusRequest.status) ? 'bg-yellow-100 dark:bg-yellow-900' : (['Approved', 'Printed', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-100 dark:bg-green-900' : 'bg-slate-100 dark:bg-slate-700')}`}>
-                                                    <span className={`material-symbols-outlined text-sm ${['Pending', 'In Review'].includes(statusRequest.status) ? 'text-yellow-600 dark:text-yellow-400' : (['Approved', 'Printed', 'Ready for Pickup'].includes(statusRequest.status) ? 'text-green-600 dark:text-green-400' : 'text-slate-500 dark:text-slate-400')}`}>
-                                                        {['Approved', 'Printed', 'Ready for Pickup'].includes(statusRequest.status) ? 'check' : 'hourglass_top'}
-                                                    </span>
-                                                </span>
-                                                <h3 className="mt-2 text-base font-semibold text-slate-900 dark:text-white">In Review</h3>
-                                            </div>
-
-                                            <div className={`flex-1 h-px mt-4 ${['Approved', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-500' : 'bg-slate-200 dark:bg-slate-700'} mx-4`}></div>
-
-                                            <div className={`flex flex-col items-center text-center ${['Approved', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? '' : 'opacity-50'}`}>
-                                                <span className={`flex items-center justify-center w-8 h-8 rounded-full ring-4 ring-white dark:ring-slate-900/50 ${['Approved', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-100 dark:bg-green-900' : 'bg-slate-100 dark:bg-slate-700'}`}>
-                                                    <span className={`material-symbols-outlined text-sm ${['Approved', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'text-green-600 dark:text-green-400' : 'text-slate-500 dark:text-slate-400'}`}>
-                                                        {['Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'check' : 'verified'}
-                                                    </span>
-                                                </span>
-                                                <h3 className={`mt-2 text-base font-semibold ${['Approved', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'text-slate-900 dark:text-white' : 'text-slate-500 dark:text-slate-400'}`}>Approved</h3>
-                                            </div>
-
-                                            <div className={`flex-1 h-px mt-4 ${['Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-500' : 'bg-slate-200 dark:bg-slate-700'} mx-4`}></div>
-
-                                            <div className={`flex flex-col items-center text-center ${['Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? '' : 'opacity-50'}`}>
-                                                <span className={`flex items-center justify-center w-8 h-8 rounded-full ring-4 ring-white dark:ring-slate-900/50 ${['Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-100 dark:bg-green-900' : 'bg-slate-100 dark:bg-slate-700'}`}>
-                                                    <span className={`material-symbols-outlined text-sm ${['Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'text-green-600 dark:text-green-400' : 'text-slate-500 dark:text-slate-400'}`}>
-                                                        {['Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'check' : 'print'}
-                                                    </span>
-                                                </span>
-                                                <h3 className={`mt-2 text-base font-semibold ${['Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'text-slate-900 dark:text-white' : 'text-slate-500 dark:text-slate-400'}`}>Printed</h3>
-                                            </div>
-
-                                            <div className={`flex-1 h-px mt-4 ${['Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-500' : 'bg-slate-200 dark:bg-slate-700'} mx-4`}></div>
-
-                                            <div className={`flex flex-col items-center text-center ${['Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? '' : 'opacity-50'}`}>
-                                                <span className={`flex items-center justify-center w-8 h-8 rounded-full ring-4 ring-white dark:ring-slate-900/50 ${['Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-100 dark:bg-green-900' : 'bg-slate-100 dark:bg-slate-700'}`}>
-                                                    <span className={`material-symbols-outlined text-sm ${['Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'text-green-600 dark:text-green-400' : 'text-slate-500 dark:text-slate-400'}`}>storefront</span>
-                                                </span>
-                                                <h3 className={`mt-2 text-base font-semibold ${['Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'text-slate-900 dark:text-white' : 'text-slate-500 dark:text-slate-400'}`}>Ready to Collect</h3>
-                                            </div>
-                                        </div>
-
-                                        {/* Vertical view for mobile screens */}
-                                        <div className="flex sm:hidden flex-col gap-6 pt-4">
-                                            <div className="flex items-start gap-4">
-                                                <div className="flex flex-col items-center">
-                                                    <span className="flex items-center justify-center w-8 h-8 rounded-full bg-green-100 text-green-600">
-                                                        <span className="material-symbols-outlined text-sm">check</span>
-                                                    </span>
-                                                    <div className="w-0.5 h-10 bg-green-500 my-1"></div>
-                                                </div>
-                                                <div>
-                                                    <h3 className="font-semibold text-slate-900">Submitted</h3>
-                                                    <p className="text-sm text-slate-500">{statusRequest.date}</p>
-                                                </div>
-                                            </div>
-
-                                            <div className={`flex items-start gap-4 ${['Pending', 'In Review', 'Approved', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? '' : 'opacity-50'}`}>
-                                                <div className="flex flex-col items-center">
-                                                    <span className={`flex items-center justify-center w-8 h-8 rounded-full ${['Pending', 'In Review'].includes(statusRequest.status) ? 'bg-yellow-100 text-yellow-600' : (['Approved', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-500')}`}>
-                                                        <span className="material-symbols-outlined text-sm">
-                                                            {['Approved', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'check' : 'hourglass_top'}
-                                                        </span>
-                                                    </span>
-                                                    <div className={`w-0.5 h-10 my-1 ${['Approved', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-500' : 'bg-slate-200'}`}></div>
-                                                </div>
-                                                <div>
-                                                    <h3 className="font-semibold text-slate-900">In Review</h3>
-                                                    <p className="text-sm text-slate-500">Processing your details</p>
-                                                </div>
-                                            </div>
-
-                                            <div className={`flex items-start gap-4 ${['Approved', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? '' : 'opacity-50'}`}>
-                                                <div className="flex flex-col items-center">
-                                                    <span className={`flex items-center justify-center w-8 h-8 rounded-full ${['Approved', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? (['Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-100 text-green-600' : 'bg-blue-100 text-blue-600') : 'bg-slate-100 text-slate-500'}`}>
-                                                        <span className="material-symbols-outlined text-sm">
-                                                            {['Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'check' : 'verified'}
-                                                        </span>
-                                                    </span>
-                                                    <div className={`w-0.5 h-10 my-1 ${['Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-500' : 'bg-slate-200'}`}></div>
-                                                </div>
-                                                <div>
-                                                    <h3 className="font-semibold text-slate-900">Approved</h3>
-                                                    <p className="text-sm text-slate-500">Verified by Admin</p>
-                                                </div>
-                                            </div>
-
-                                            <div className={`flex items-start gap-4 ${['Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? '' : 'opacity-50'}`}>
-                                                <div className="flex flex-col items-center">
-                                                    <span className={`flex items-center justify-center w-8 h-8 rounded-full ${['Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? (['Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-100 text-green-600' : 'bg-purple-100 text-purple-600') : 'bg-slate-100 text-slate-500'}`}>
-                                                        <span className="material-symbols-outlined text-sm">
-                                                            {['Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'check' : 'print'}
-                                                        </span>
-                                                    </span>
-                                                    <div className={`w-0.5 h-10 my-1 ${['Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-500' : 'bg-slate-200'}`}></div>
-                                                </div>
-                                                <div>
-                                                    <h3 className="font-semibold text-slate-900">Printed</h3>
-                                                    <p className="text-sm text-slate-500">Card is ready</p>
-                                                </div>
-                                            </div>
-
-                                            <div className={`flex items-start gap-4 ${['Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? '' : 'opacity-50'}`}>
-                                                <div className="flex flex-col items-center">
-                                                    <span className={`flex items-center justify-center w-8 h-8 rounded-full ${['Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-500'}`}>
-                                                        <span className="material-symbols-outlined text-sm">storefront</span>
-                                                    </span>
-                                                </div>
-                                                <div>
-                                                    <h3 className="font-semibold text-slate-900">Ready to Collect</h3>
-                                                    <p className="text-sm text-slate-500">Collect from office</p>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                    </>
-
-                                ) : (
-                                    <p className="text-gray-500 text-center py-10">No requests to track. Start by requesting a new ID card.</p>
-                                )}
-                            </div>
-                        </div>
-
-                        <div className="lg:col-span-1">
-                            <div className="bg-white dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm h-full">
-                                <h2 className="text-slate-900 dark:text-white text-[20px] font-bold mb-4">Your Recent Requests</h2>
-                                <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
-                                    {requests.length === 0 ? (
-                                        <p className="text-gray-500 text-sm">No requests found.</p>
-                                    ) : (
-                                        requests.map((req) => (
-                                            <div
-                                                key={req.id}
-                                                onClick={() => setSelectedRequest(req)}
-                                                className={`p-4 rounded-lg border cursor-pointer transition-all ${selectedRequest?.id === req.id ? 'border-[#f48120] bg-orange-50 dark:bg-orange-900/10' : 'border-gray-100 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700'}`}
-                                            >
-                                                <div className="flex justify-between items-start mb-1">
-                                                    <span className="font-bold text-sm text-gray-900 dark:text-white">Request #{req.id}</span>
-                                                    <span className="text-[10px] text-gray-500">{req.date}</span>
-                                                </div>
-                                                <div className="flex justify-between items-center">
-                                                    <span className="text-xs text-gray-600 dark:text-gray-400">{req.name}</span>
-                                                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${req.status === 'Ready to Collect' ? 'bg-green-100 text-green-700' :
-                                                        req.status === 'Ready for Pickup' ? 'bg-green-100 text-green-700' :
-                                                            req.status === 'Printed' ? 'bg-blue-100 text-blue-700' :
-                                                                req.status === 'Rejected' ? 'bg-red-100 text-red-700' :
-                                                                    'bg-yellow-100 text-yellow-700'
-                                                        }`}>
-                                                        {req.status}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        ))
-                                    )}
+                                {/* Card 3: Settings */}
+                                <div className="p-6 bg-white rounded-lg shadow-[0_0.5rem_1rem_rgba(0,0,0,.05)] flex flex-col items-center text-center">
+                                    <Settings className="h-12 w-12 text-[#f48120] mb-4" />
+                                    <h2 className="text-xl font-bold mb-2">My ID Card Profile</h2>
+                                    <div className="mb-4 text-sm text-gray-600">
+                                        <p><span className="font-semibold">ID:</span> {profile?.employee_id || 'N/A'}</p>
+                                        <p><span className="font-semibold">Dept:</span> {profile?.department || 'N/A'}</p>
+                                    </div>
+                                    <Link to="/profile" className="mt-auto w-full bg-gray-200 text-gray-800 font-bold py-2 px-4 rounded-lg hover:bg-gray-300 transition-colors">Manage Profile</Link>
                                 </div>
                             </div>
-                        </div>
-                    </div>
-                </>
-            )}
-        </main>
+
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mt-10">
+                                <div className="lg:col-span-2">
+                                    <div className="bg-white dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-800 p-6 sm:p-8">
+                                        <h2 className="text-slate-900 dark:text-white text-[22px] font-bold leading-tight tracking-[-0.015em] mb-6">Track Your Request</h2>
+                                        {statusRequest ? (
+                                            <>
+                                                <div className="flex justify-between items-center mb-6">
+                                                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                                                        Tracking status for Request ID: <span className="font-bold text-[#f48120]">#{statusRequest.id}</span> ({statusRequest.name})
+                                                    </p>
+                                                    <span className={`px-3 py-1 rounded-full text-xs font-bold ${statusRequest.status === 'Ready to Collect' ? 'bg-green-100 text-green-700' :
+                                                        statusRequest.status === 'Ready for Pickup' ? 'bg-green-100 text-green-700' :
+                                                            statusRequest.status === 'Rejected' ? 'bg-red-100 text-red-700' :
+                                                                statusRequest.status === 'Printed' ? 'bg-blue-100 text-blue-700' :
+                                                                    statusRequest.status === 'Sent for Print' ? 'bg-orange-100 text-orange-700' :
+                                                                        'bg-yellow-100 text-yellow-700'
+                                                        }`}>
+                                                        {statusRequest.status}
+                                                    </span>
+                                                </div>
+
+                                                {statusRequest.status === 'Rejected' ? (
+                                                    <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-4 mb-6">
+                                                        <div className="bg-red-100 p-2 rounded-full">
+                                                            <XCircle className="h-6 w-6 text-red-600" />
+                                                        </div>
+                                                        <div>
+                                                            <h3 className="font-bold text-red-800">Request Rejected</h3>
+                                                            <p className="text-sm text-red-700">Your request has been rejected. Please contact the administrator for more details or raise a new request with corrected information.</p>
+                                                        </div>
+                                                    </div>
+                                                ) : null}
+
+                                                {/* Horizontal view for larger screens */}
+                                                <div className="hidden sm:flex justify-between items-start pt-4">
+                                                    <div className={`flex flex-col items-center text-center`}>
+                                                        <span className={`flex items-center justify-center w-8 h-8 rounded-full ring-4 ring-white dark:ring-slate-900/50 bg-green-100 dark:bg-green-900`}>
+                                                            <span className={`material-symbols-outlined text-sm text-green-600 dark:text-green-400`}>check</span>
+                                                        </span>
+                                                        <h3 className="mt-2 text-base font-semibold text-slate-900 dark:text-white">Submitted</h3>
+                                                        <time className="text-sm text-slate-400 dark:text-slate-500">{statusRequest.date}</time>
+                                                    </div>
+
+                                                    <div className={`flex-1 h-px mt-4 ${['In Review', 'Approved', 'Sent for Print', 'Printed', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-500' : 'bg-slate-200 dark:bg-slate-700'} mx-4`}></div>
+
+                                                    <div className={`flex flex-col items-center text-center ${['Pending', 'In Review', 'Approved', 'Sent for Print', 'Printed', 'Ready for Pickup'].includes(statusRequest.status) ? '' : 'opacity-50'}`}>
+                                                        <span className={`flex items-center justify-center w-8 h-8 rounded-full ring-4 ring-white dark:ring-slate-900/50 ${['Pending', 'In Review'].includes(statusRequest.status) ? 'bg-yellow-100 dark:bg-yellow-900' : (['Approved', 'Sent for Print', 'Printed', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-100 dark:bg-green-900' : 'bg-slate-100 dark:bg-slate-700')}`}>
+                                                            <span className={`material-symbols-outlined text-sm ${['Pending', 'In Review'].includes(statusRequest.status) ? 'text-yellow-600 dark:text-yellow-400' : (['Approved', 'Sent for Print', 'Printed', 'Ready for Pickup'].includes(statusRequest.status) ? 'text-green-600 dark:text-green-400' : 'text-slate-500 dark:text-slate-400')}`}>
+                                                                {['Approved', 'Sent for Print', 'Printed', 'Ready for Pickup'].includes(statusRequest.status) ? 'check' : 'hourglass_top'}
+                                                            </span>
+                                                        </span>
+                                                        <h3 className="mt-2 text-base font-semibold text-slate-900 dark:text-white">In Review</h3>
+                                                    </div>
+
+                                                    <div className={`flex-1 h-px mt-4 ${['Approved', 'Sent for Print', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-500' : 'bg-slate-200 dark:bg-slate-700'} mx-4`}></div>
+
+                                                    <div className={`flex flex-col items-center text-center ${['Approved', 'Sent for Print', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? '' : 'opacity-50'}`}>
+                                                        <span className={`flex items-center justify-center w-8 h-8 rounded-full ring-4 ring-white dark:ring-slate-900/50 ${['Approved', 'Sent for Print', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-100 dark:bg-green-900' : 'bg-slate-100 dark:bg-slate-700'}`}>
+                                                            <span className={`material-symbols-outlined text-sm ${['Approved', 'Sent for Print', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'text-green-600 dark:text-green-400' : 'text-slate-500 dark:text-slate-400'}`}>
+                                                                {['Sent for Print', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'check' : 'verified'}
+                                                            </span>
+                                                        </span>
+                                                        <h3 className={`mt-2 text-base font-semibold ${['Approved', 'Sent for Print', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'text-slate-900 dark:text-white' : 'text-slate-500 dark:text-slate-400'}`}>Approved</h3>
+                                                    </div>
+
+                                                    <div className={`flex-1 h-px mt-4 ${['Sent for Print', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-500' : 'bg-slate-200 dark:bg-slate-700'} mx-4`}></div>
+
+                                                    <div className={`flex flex-col items-center text-center ${['Sent for Print', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? '' : 'opacity-50'}`}>
+                                                        <span className={`flex items-center justify-center w-8 h-8 rounded-full ring-4 ring-white dark:ring-slate-900/50 ${['Sent for Print', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-blue-100 dark:bg-blue-900' : 'bg-slate-100 dark:bg-slate-700'}`}>
+                                                            <span className={`material-symbols-outlined text-sm ${['Sent for Print', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-slate-400'}`}>
+                                                                {['Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'check' : 'local_shipping'}
+                                                            </span>
+                                                        </span>
+                                                        <h3 className={`mt-2 text-base font-semibold ${['Sent for Print', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'text-slate-900 dark:text-white' : 'text-slate-500 dark:text-slate-400'}`}>Sent for Print</h3>
+                                                    </div>
+
+                                                    <div className={`flex-1 h-px mt-4 ${['Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-500' : 'bg-slate-200 dark:bg-slate-700'} mx-4`}></div>
+
+                                                    <div className={`flex flex-col items-center text-center ${['Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? '' : 'opacity-50'}`}>
+                                                        <span className={`flex items-center justify-center w-8 h-8 rounded-full ring-4 ring-white dark:ring-slate-900/50 ${['Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-100 dark:bg-green-900' : 'bg-slate-100 dark:bg-slate-700'}`}>
+                                                            <span className={`material-symbols-outlined text-sm ${['Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'text-green-600 dark:text-green-400' : 'text-slate-500 dark:text-slate-400'}`}>
+                                                                {['Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'check' : 'print'}
+                                                            </span>
+                                                        </span>
+                                                        <h3 className={`mt-2 text-base font-semibold ${['Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'text-slate-900 dark:text-white' : 'text-slate-500 dark:text-slate-400'}`}>Printed</h3>
+                                                    </div>
+
+                                                    <div className={`flex-1 h-px mt-4 ${['Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-500' : 'bg-slate-200 dark:bg-slate-700'} mx-4`}></div>
+
+                                                    <div className={`flex flex-col items-center text-center ${['Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? '' : 'opacity-50'}`}>
+                                                        <span className={`flex items-center justify-center w-8 h-8 rounded-full ring-4 ring-white dark:ring-slate-900/50 ${['Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-100 dark:bg-green-900' : 'bg-slate-100 dark:bg-slate-700'}`}>
+                                                            <span className={`material-symbols-outlined text-sm ${['Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'text-green-600 dark:text-green-400' : 'text-slate-500 dark:text-slate-400'}`}>storefront</span>
+                                                        </span>
+                                                        <h3 className={`mt-2 text-base font-semibold ${['Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'text-slate-900 dark:text-white' : 'text-slate-500 dark:text-slate-400'}`}>Ready to Collect</h3>
+                                                    </div>
+                                                </div>
+
+                                                {/* Vertical view for mobile screens */}
+                                                <div className="flex sm:hidden flex-col gap-6 pt-4">
+                                                    <div className="flex items-start gap-4">
+                                                        <div className="flex flex-col items-center">
+                                                            <span className="flex items-center justify-center w-8 h-8 rounded-full bg-green-100 text-green-600">
+                                                                <span className="material-symbols-outlined text-sm">check</span>
+                                                            </span>
+                                                            <div className="w-0.5 h-10 bg-green-500 my-1"></div>
+                                                        </div>
+                                                        <div>
+                                                            <h3 className="font-semibold text-slate-900">Submitted</h3>
+                                                            <p className="text-sm text-slate-500">{statusRequest.date}</p>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className={`flex items-start gap-4 ${['Pending', 'In Review', 'Approved', 'Sent for Print', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? '' : 'opacity-50'}`}>
+                                                        <div className="flex flex-col items-center">
+                                                            <span className={`flex items-center justify-center w-8 h-8 rounded-full ${['Pending', 'In Review'].includes(statusRequest.status) ? 'bg-yellow-100 text-yellow-600' : (['Approved', 'Sent for Print', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-500')}`}>
+                                                                <span className="material-symbols-outlined text-sm">
+                                                                    {['Approved', 'Sent for Print', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'check' : 'hourglass_top'}
+                                                                </span>
+                                                            </span>
+                                                            <div className={`w-0.5 h-10 my-1 ${['Approved', 'Sent for Print', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-500' : 'bg-slate-200'}`}></div>
+                                                        </div>
+                                                        <div>
+                                                            <h3 className="font-semibold text-slate-900">In Review</h3>
+                                                            <p className="text-sm text-slate-500">Processing your details</p>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className={`flex items-start gap-4 ${['Approved', 'Sent for Print', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? '' : 'opacity-50'}`}>
+                                                        <div className="flex flex-col items-center">
+                                                            <span className={`flex items-center justify-center w-8 h-8 rounded-full ${['Approved', 'Sent for Print', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? (['Sent for Print', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-100 text-green-600' : 'bg-blue-100 text-blue-600') : 'bg-slate-100 text-slate-500'}`}>
+                                                                <span className="material-symbols-outlined text-sm">
+                                                                    {['Sent for Print', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'check' : 'verified'}
+                                                                </span>
+                                                            </span>
+                                                            <div className={`w-0.5 h-10 my-1 ${['Sent for Print', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-500' : 'bg-slate-200'}`}></div>
+                                                        </div>
+                                                        <div>
+                                                            <h3 className="font-semibold text-slate-900">Approved</h3>
+                                                            <p className="text-sm text-slate-500">Verified by Admin</p>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className={`flex items-start gap-4 ${['Sent for Print', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? '' : 'opacity-50'}`}>
+                                                        <div className="flex flex-col items-center">
+                                                            <span className={`flex items-center justify-center w-8 h-8 rounded-full ${['Sent for Print', 'Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? (['Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-100 text-green-600' : 'bg-blue-100 text-blue-600') : 'bg-slate-100 text-slate-500'}`}>
+                                                                <span className="material-symbols-outlined text-sm">
+                                                                    {['Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'check' : 'local_shipping'}
+                                                                </span>
+                                                            </span>
+                                                            <div className={`w-0.5 h-10 my-1 ${['Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-500' : 'bg-slate-200'}`}></div>
+                                                        </div>
+                                                        <div>
+                                                            <h3 className="font-semibold text-slate-900">Sent for Print</h3>
+                                                            <p className="text-sm text-slate-500">Cards sent to vendor</p>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className={`flex items-start gap-4 ${['Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? '' : 'opacity-50'}`}>
+                                                        <div className="flex flex-col items-center">
+                                                            <span className={`flex items-center justify-center w-8 h-8 rounded-full ${['Printed', 'Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? (['Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-100 text-green-600' : 'bg-purple-100 text-purple-600') : 'bg-slate-100 text-slate-500'}`}>
+                                                                <span className="material-symbols-outlined text-sm">
+                                                                    {['Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'check' : 'print'}
+                                                                </span>
+                                                            </span>
+                                                            <div className={`w-0.5 h-10 my-1 ${['Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-500' : 'bg-slate-200'}`}></div>
+                                                        </div>
+                                                        <div>
+                                                            <h3 className="font-semibold text-slate-900">Printed</h3>
+                                                            <p className="text-sm text-slate-500">Card is ready</p>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className={`flex items-start gap-4 ${['Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? '' : 'opacity-50'}`}>
+                                                        <div className="flex flex-col items-center">
+                                                            <span className={`flex items-center justify-center w-8 h-8 rounded-full ${['Ready to Collect', 'Ready for Pickup'].includes(statusRequest.status) ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-500'}`}>
+                                                                <span className="material-symbols-outlined text-sm">storefront</span>
+                                                            </span>
+                                                        </div>
+                                                        <div>
+                                                            <h3 className="font-semibold text-slate-900">Ready to Collect</h3>
+                                                            <p className="text-sm text-slate-500">Collect from office</p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                            </>
+
+                                        ) : (
+                                            <p className="text-gray-500 text-center py-10">No requests to track. Start by requesting a new ID card.</p>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="lg:col-span-1">
+                                    <div className="bg-white dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm h-full">
+                                        <h2 className="text-slate-900 dark:text-white text-[20px] font-bold mb-4">Your Recent Requests</h2>
+                                        <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
+                                            {requests.length === 0 ? (
+                                                <p className="text-gray-500 text-sm">No requests found.</p>
+                                            ) : (
+                                                requests.map((req) => (
+                                                    <div
+                                                        key={req.id}
+                                                        onClick={() => setSelectedRequest(req)}
+                                                        className={`p-4 rounded-lg border cursor-pointer transition-all ${selectedRequest?.id === req.id ? 'border-[#f48120] bg-orange-50 dark:bg-orange-900/10' : 'border-gray-100 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700'}`}
+                                                    >
+                                                        <div className="flex justify-between items-start mb-1">
+                                                            <span className="font-bold text-sm text-gray-900 dark:text-white">Request #{req.id}</span>
+                                                            <span className="text-[10px] text-gray-500">{req.date}</span>
+                                                        </div>
+                                                        <div className="flex justify-between items-center">
+                                                            <span className="text-xs text-gray-600 dark:text-gray-400">{req.name}</span>
+                                                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${req.status === 'Ready to Collect' ? 'bg-green-100 text-green-700' :
+                                                                req.status === 'Ready for Pickup' ? 'bg-green-100 text-green-700' :
+                                                                    req.status === 'Printed' ? 'bg-blue-100 text-blue-700' :
+                                                                        req.status === 'Rejected' ? 'bg-red-100 text-red-700' :
+                                                                            'bg-yellow-100 text-yellow-700'
+                                                                }`}>
+                                                                {req.status}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                ))
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </>
+                    )}
+                </main>
             </div>
 
             {/* Sidebar for mobile */}

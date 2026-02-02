@@ -70,16 +70,35 @@ const EditRequest: React.FC = () => {
         const fetchRequest = async () => {
             if (!id) return;
 
+            const params = new URLSearchParams(window.location.search);
+            const tableName = params.get('table') || 'requests';
+
+            // sanitize id - requests.id is a numeric bigserial
+            const numericId = parseInt(id, 10);
+            if (isNaN(numericId)) {
+                console.warn('Invalid request id:', id);
+                toast.error('Invalid request id.');
+                return;
+            }
+
+            // use maybeSingle to avoid PostgREST PGRST116 when no rows match
             const { data, error } = await supabase
-                .from('requests')
+                .from(tableName)
                 .select('*')
-                .eq('id', id)
-                .single();
+                .eq('id', numericId)
+                .maybeSingle();
 
             if (error) {
                 console.error('Error fetching request:', error);
                 toast.error('Failed to load request details.');
-            } else if (data) {
+                return;
+            } else if (!data) {
+                // No matching row found
+                console.warn('Request not found for id:', numericId);
+                toast.error('Request not found.');
+                navigate(-1);
+                return;
+            } else {
                 setEmployee({
                     fullName: data.full_name,
                     employeeId: data.employee_id,
@@ -554,8 +573,8 @@ const EditRequest: React.FC = () => {
         try {
             const finalPhotoUrl = await processAndUploadImage();
 
-            const frontCard = document.querySelector('.id-card-front-container') as HTMLElement;
-            const backCard = document.querySelector('.id-card-back-container') as HTMLElement;
+            const frontCard = document.querySelector('.id-card-front') as HTMLElement;
+            const backCard = document.querySelector('.id-card-back') as HTMLElement;
 
             if (!frontCard || !backCard) {
                 throw new Error('Card elements not found');

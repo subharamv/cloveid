@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom';
 const CACHE_KEY = 'auth_cache';
 
 interface CachedAuth {
-    session: Session | null;
+    userId: string | null;
     userRole: string | null;
     isActive: boolean | null;
     profile: any | null;
@@ -19,6 +19,8 @@ interface AuthContextType {
     isActive: boolean | null;
     profile: any | null;
     loading: boolean;
+    authReady: boolean;
+    profileLoaded: boolean;
     logout: () => Promise<void>;
     clearSession: () => Promise<void>;
 }
@@ -31,28 +33,40 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const [isActive, setIsActive] = useState<boolean | null>(null);
     const [profile, setProfile] = useState<any | null>(null);
     const [loading, setLoading] = useState(true);
+    const [authReady, setAuthReady] = useState(false);
+    const [profileLoaded, setProfileLoaded] = useState(false);
     const loadingRef = useRef(true);
+    const authReadyRef = useRef(false);
+    const profileCacheRef = useRef<{ userId: string; profile: any; timestamp: number } | null>(null);
     const mounted = useRef(true);
     const navigate = useNavigate();
+    const lastInitializedUserRef = useRef<string | null>(null);
 
     // Sync loadingRef with loading state
     useEffect(() => {
         loadingRef.current = loading;
     }, [loading]);
 
+    // Sync authReadyRef with authReady state
+    useEffect(() => {
+        authReadyRef.current = authReady;
+    }, [authReady]);
+
     const getCachedAuth = (): CachedAuth | null => {
         try {
             const cached = localStorage.getItem(CACHE_KEY);
             return cached ? JSON.parse(cached) : null;
-        } catch {
+        } catch (err) {
+            console.error('Error reading cached auth:', err);
             return null;
         }
     };
 
     const setCachedAuth = (session: Session | null, userRole: string | null, isActive: boolean | null, profileData: any | null = null) => {
         try {
-            if (session) {
-                localStorage.setItem(CACHE_KEY, JSON.stringify({ session, userRole, isActive, profile: profileData }));
+            if (session && session.user?.id) {
+                const payload = { userId: session.user.id, userRole, isActive, profile: profileData };
+                localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
             } else {
                 localStorage.removeItem(CACHE_KEY);
             }
@@ -61,10 +75,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         }
     };
 
-    const getProfile = async (userId: string, retries = 2): Promise<any | null> => {
+    const getProfile = async (userId: string, role?: string | null, retries = 1): Promise<any | null> => {
         if (!userId) {
             console.error('getProfile called without userId');
             return null;
+        }
+
+        // CRITICAL: Cache short-circuit - return immediately if cached, do NOT fetch again
+        if (profileCacheRef.current && profileCacheRef.current.userId === userId) {
+            const cacheAge = Date.now() - profileCacheRef.current.timestamp;
+            if (cacheAge < 30000) { // 30 second cache
+                console.log('Profile cache HIT for user:', userId, 'role:', role, '- returning cached profile, NOT fetching');
+                return profileCacheRef.current.profile; // Return immediately, no fetch
+            }
         }
 
         for (let i = 0; i <= retries; i++) {
@@ -74,14 +97,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             }
 
             const controller = new AbortController();
-            const timeoutDuration = 15000 + (i * 5000); // 15s, 20s, 25s
+            const timeoutDuration = 10000; // 10 seconds per attempt
             const timeoutId = setTimeout(() => {
-                console.warn(`Profile fetch attempt ${i + 1} timing out after ${timeoutDuration}ms`);
+                console.warn(`Profile fetch attempt ${i + 1} timing out after ${timeoutDuration}ms for user ${userId}`);
                 controller.abort();
             }, timeoutDuration);
 
             try {
-                console.log(`Fetching profile for user ${userId} (attempt ${i + 1}/${retries + 1})`);
+                console.log(`Fetching profile for user ${userId} with role: ${role || 'unknown'} (attempt ${i + 1}/${retries + 1})`);
                 const { data: profile, error } = await supabase
                     .from('profiles')
                     .select('*')
@@ -94,17 +117,27 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 if (error) {
                     if (error.code === 'PGRST116') {
                         console.warn('Profile not found in database for user:', userId);
+                        // Cache the "not found" result
+                        profileCacheRef.current = { userId, profile: null, timestamp: Date.now() };
                         return null;
                     }
                     throw error;
                 }
 
                 if (profile) {
-                    console.log('Profile fetched successfully:', { role: profile.role, is_active: profile.is_active });
+                    console.log('Profile fetched successfully:', {
+                        userId,
+                        role: profile.role,
+                        is_active: profile.is_active,
+                        branch: profile.branch,
+                        full_name: profile.full_name
+                    });
+                    // Cache the profile
+                    profileCacheRef.current = { userId, profile, timestamp: Date.now() };
                     return profile;
                 }
 
-                console.warn('Profile query returned no data');
+                console.warn('Profile query returned no data for user:', userId);
                 return null;
             } catch (err: unknown) {
                 clearTimeout(timeoutId);
@@ -112,7 +145,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 const errorMessage = err instanceof Error ? err.message : String(err);
 
                 if (i === retries) {
-                    console.error(`Profile fetch failed after ${retries + 1} attempts:`, errorMessage);
+                    console.error(`Profile fetch failed after ${retries + 1} attempts for user ${userId}:`, errorMessage);
+                    // Return null to allow app to continue with defaults/metadata
                     return null;
                 }
 
@@ -126,7 +160,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     const handleClearAuth = useCallback((isExplicitLogout = false) => {
         console.log('Clearing auth state...', { isExplicitLogout });
-        
+
         // Safety: If we are on the reset password page, do NOT clear the state or redirect
         // unless it's an explicit logout action. This prevents timing issues from
         // kicking users out of the recovery flow.
@@ -140,6 +174,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             setUserRole(null);
             setIsActive(null);
             setProfile(null);
+            setAuthReady(false);
+            setProfileLoaded(false);
+            lastInitializedUserRef.current = null;
             setCachedAuth(null, null, null, null);
             setLoading(false);
         }
@@ -190,6 +227,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }, [handleClearAuth]);
 
     const initAuth = useCallback(async () => {
+        // GUARD: If auth is already ready for the same user, skip re-processing
+        if (authReadyRef.current && lastInitializedUserRef.current) {
+            console.log('Auth already initialized for user:', lastInitializedUserRef.current, '- skipping reinit');
+            return;
+        }
+
         if (initInProgress.current) {
             console.log('Auth initialization already in progress, skipping');
             return;
@@ -198,72 +241,104 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
         const timeoutId = setTimeout(() => {
             if (loadingRef.current && mounted.current) {
-                console.warn('Auth initialization timed out after 60s, forcing loading to false');
+                console.warn('Auth initialization timed out after 30s, forcing loading to false');
                 setLoading(false);
             }
-        }, 60000);
+        }, 30000);
 
         try {
             console.log('Initializing auth, verifying session...');
-            
-            // Wrap getSession in a promise with timeout - set to 45s
-            const sessionPromise = supabase.auth.getSession();
-            const sessionTimeout = new Promise<{ data: { session: Session | null }, error: any }>((_, reject) => 
-                setTimeout(() => {
-                    console.error('getSession timeout reached (45s)');
-                    reject(new Error('getSession timeout'));
-                }, 45000)
-            );
 
-            console.log('Awaiting session promise...');
-            const { data: { session: supabaseSession }, error } = await Promise.race([
-                sessionPromise,
-                sessionTimeout as any
-            ]);
-            console.log('Session promise resolved:', { hasSession: !!supabaseSession, error });
-
-            if (error) {
-                console.error('Supabase getSession error:', error);
-                // If it's just a timeout, don't clear everything yet, maybe we have cached data
-                if (error.message !== 'getSession timeout') {
-                    handleClearAuth(false);
-                } else {
-                    console.warn('Proceeding with cached auth (if any) due to getSession timeout');
-                }
+            // RULE 5: getSession must be read-only after auth is established
+            if (authReadyRef.current) {
+                console.log('Auth already ready, skipping getSession call');
+                clearTimeout(timeoutId);
+                initInProgress.current = false;
                 return;
             }
 
-            if (!mounted.current) return;
+            let supabaseSession = null;
+            let sessionError = null;
+
+            try {
+                const { data, error } = await supabase.auth.getSession();
+                supabaseSession = data?.session ?? null;
+                sessionError = error ?? null;
+                console.log('getSession resolved:', { hasSession: !!supabaseSession, hasError: !!sessionError });
+            } catch (err) {
+                console.error('getSession threw exception:', err);
+                sessionError = err;
+            }
+
+            if (sessionError) {
+                console.error('Supabase getSession error:', sessionError);
+                handleClearAuth(false);
+                clearTimeout(timeoutId);
+                initInProgress.current = false;
+                return;
+            }
+
+            if (!mounted.current) {
+                clearTimeout(timeoutId);
+                initInProgress.current = false;
+                return;
+            }
 
             if (supabaseSession) {
-                console.log('Session found for user:', supabaseSession.user.id);
-                
-                // If we are on the reset password page, we don't need a profile immediately
+                console.log('INITIAL_SESSION detected for user:', supabaseSession.user.id);
+
                 if (window.location.pathname === '/reset-password') {
                     console.log('initAuth: Reset password page detected, skipping profile fetch');
                     setSession(supabaseSession);
+                    setAuthReady(true);
+                    lastInitializedUserRef.current = supabaseSession.user.id;
                     setLoading(false);
+                    clearTimeout(timeoutId);
+                    initInProgress.current = false;
                     return;
                 }
 
-                // Validate cache is for the same user
                 const cached = getCachedAuth();
-                const isCacheValid = cached?.session?.user?.id === supabaseSession.user.id;
-                
-                const profile = await getProfile(supabaseSession.user.id);
+                const isCacheValid = cached?.userId === supabaseSession.user.id;
 
-                if (!mounted.current) return;
+                const roleFromMetadata = supabaseSession.user.user_metadata?.role;
+                const roleFromCache = isCacheValid ? cached?.userRole : null;
+                const detectedRole = roleFromMetadata || roleFromCache;
 
-                // Priority: fresh profile > user_metadata > valid cache > defaults
+                console.log('Session found, loading profile based on role:', {
+                    userId: supabaseSession.user.id,
+                    detectedRole
+                });
+
+                // RULE 4: Decouple profile loading from auth readiness - mark auth ready first
+                setSession(supabaseSession);
+                setAuthReady(true);
+                lastInitializedUserRef.current = supabaseSession.user.id;
+                setLoading(false);
+
+                // Load profile asynchronously, don't block auth readiness
+                const profile = await getProfile(supabaseSession.user.id, detectedRole);
+
+                if (!mounted.current) {
+                    clearTimeout(timeoutId);
+                    initInProgress.current = false;
+                    return;
+                }
+
                 const role = profile?.role || supabaseSession.user.user_metadata?.role || (isCacheValid ? cached?.userRole : null);
                 const active = profile?.is_active ?? (isCacheValid ? cached?.isActive : null) ?? (role === 'admin' ? true : null);
 
-                console.log('Auth verification complete:', { role, active });
+                console.log('Auth verification complete:', {
+                    userId: supabaseSession.user.id,
+                    role,
+                    active,
+                    profileLoaded: !!profile
+                });
 
-                setSession(supabaseSession);
                 setUserRole(role);
                 setIsActive(active);
                 setProfile(profile || (isCacheValid ? cached?.profile : null));
+                setProfileLoaded(true);
 
                 if (role) {
                     setCachedAuth(supabaseSession, role, active, profile || (isCacheValid ? cached?.profile : null));
@@ -337,55 +412,134 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             const isResetPasswordRoute = window.location.pathname === '/reset-password';
             console.log('Auth state change event:', event, 'user:', currentSession?.user?.id, 'isResetRoute:', isResetPasswordRoute);
 
-            if (event === 'PASSWORD_RECOVERY' || event === 'USER_UPDATED' || (event === 'SIGNED_IN' && isResetPasswordRoute)) {
-                console.log(`Auth event ${event} detected during reset/recovery - skipping profile fetch`);
-                setSession(currentSession);
-                setLoading(false);
+            // RULE 2: Skip SIGNED_IN if already initialized for the same user
+            if (event === 'SIGNED_IN' && authReadyRef.current && currentSession?.user?.id === lastInitializedUserRef.current) {
+                console.log('SIGNED_IN skipped - auth already initialized for user:', lastInitializedUserRef.current);
                 return;
             }
 
-            if (currentSession) {
-                // Validate cache is for the same user
-                const cached = getCachedAuth();
-                const isCacheValid = cached?.session?.user?.id === currentSession.user.id;
-
-                // Always fetch fresh profile data on auth state changes
-                const profile = await getProfile(currentSession.user.id);
-
-                if (!mounted.current) {
-                    console.log('Component unmounted during profile fetch, skipping state update');
-                    return;
-                }
-
-                // Priority: fresh profile > user_metadata > valid cache > defaults
-                const role = profile?.role || currentSession.user.user_metadata?.role || (isCacheValid ? cached?.userRole : null);
-                const active = profile?.is_active ?? (isCacheValid ? cached?.isActive : null) ?? (role === 'admin' ? true : null);
-
-                console.log('Auth state update processed:', { event, role, active });
-
-                setSession(currentSession);
-                setUserRole(role);
-                setIsActive(active);
-                setProfile(profile || (isCacheValid ? cached?.profile : null));
-
-                if (role) {
-                    setCachedAuth(currentSession, role, active, profile || (isCacheValid ? cached?.profile : null));
-                }
-            } else if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
-                console.log('Auth event:', event, '- clearing session');
-                handleClearAuth(true);
-            } else {
-                if (isResetPasswordRoute) {
-                    console.log('Ignoring state clear for event:', event, 'on reset-password route');
+            // Set a timeout to ensure loading is never stuck for too long on auth state changes
+            const authStateTimeout = setTimeout(() => {
+                if (mounted.current && loadingRef.current) {
+                    console.warn('Auth state change handler taking too long, forcing loading to false');
                     setLoading(false);
+                }
+            }, 20000); // 20 second maximum for auth state change processing
+
+            try {
+                if (event === 'PASSWORD_RECOVERY' || event === 'USER_UPDATED' || (event === 'SIGNED_IN' && isResetPasswordRoute)) {
+                    console.log(`Auth event ${event} detected during reset/recovery - skipping profile fetch`);
+                    setSession(currentSession);
+                    setLoading(false);
+                    clearTimeout(authStateTimeout);
                     return;
                 }
-                console.log('Auth event:', event, 'with no session - clearing state');
-                handleClearAuth(false);
-            }
 
-            if (mounted.current) {
-                setLoading(false);
+                if (currentSession) {
+                    // CRITICAL FIX: Mark auth ready immediately on SIGNED_IN
+                    // Login completes NOW, not after profile loads
+                    console.log('✅ SIGNED_IN - Auth complete, marking ready immediately');
+                    setSession(currentSession);
+                    setAuthReady(true);
+                    lastInitializedUserRef.current = currentSession.user.id;
+                    setLoading(false);
+                    clearTimeout(authStateTimeout);
+
+                    // ASYNC: Load profile in background, non-blocking
+                    // Profile loading must NOT delay login completion
+                    const loadProfileAsync = async () => {
+                        try {
+                            const cached = getCachedAuth();
+                            const isCacheValid = cached?.userId === currentSession.user.id;
+
+                            // Detect role early from multiple sources
+                            const roleFromMetadata = currentSession.user.user_metadata?.role;
+                            const roleFromCache = isCacheValid ? cached?.userRole : null;
+                            const detectedRole = roleFromMetadata || roleFromCache;
+
+                            console.log('Loading profile async in background:', {
+                                userId: currentSession.user.id,
+                                detectedRole,
+                                event
+                            });
+
+                            // RULE 3: Enforce profile cache short-circuit
+                            const profile = await getProfile(currentSession.user.id, detectedRole);
+
+                            if (!mounted.current) {
+                                console.log('Component unmounted during profile fetch');
+                                return;
+                            }
+
+                            // Priority: fresh profile > user_metadata > valid cache > defaults
+                            const role = profile?.role || currentSession.user.user_metadata?.role || (isCacheValid ? cached?.userRole : null);
+                            const active = profile?.is_active ?? (isCacheValid ? cached?.isActive : null) ?? (role === 'admin' ? true : null);
+
+                            console.log('Profile loaded async:', {
+                                userId: currentSession.user.id,
+                                role,
+                                active,
+                                profileLoaded: !!profile
+                            });
+
+                            // Update state with profile data
+                            setUserRole(role);
+                            setIsActive(active);
+                            setProfile(profile || (isCacheValid ? cached?.profile : null));
+                            setProfileLoaded(true);
+
+                            if (role) {
+                                setCachedAuth(currentSession, role, active, profile || (isCacheValid ? cached?.profile : null));
+                            }
+                        } catch (profileError) {
+                            console.error('Profile load failed (non-blocking):', profileError);
+                            // Do NOT rollback auth - profile failure does not affect login
+                            // Use cached data or defaults
+                            const cached = getCachedAuth();
+                            if (cached) {
+                                setUserRole(cached.userRole);
+                                setIsActive(cached.isActive);
+                                setProfile(cached.profile);
+                            }
+                        }
+                    };
+
+                    // Fire profile load without awaiting
+                    loadProfileAsync();
+
+                    // ESCAPE HATCH: If profile takes too long, force completion anyway
+                    const profileTimeoutId = setTimeout(() => {
+                        if (mounted.current && !profileCacheRef.current) {
+                            console.warn('⚠️ Profile timeout (3s) - forcing completion with cached/default data');
+                            setProfileLoaded(true);
+                            // Auth is already ready, just ensure profile state has fallback
+                            const cached = getCachedAuth();
+                            if (cached) {
+                                setUserRole(cached.userRole);
+                                setIsActive(cached.isActive);
+                                setProfile(cached.profile);
+                            } else {
+                                // Use minimal defaults
+                                setUserRole(currentSession.user.user_metadata?.role || null);
+                                setIsActive(currentSession.user.user_metadata?.role === 'admin' ? true : null);
+                            }
+                        }
+                    }, 3000);
+                } else if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
+                    console.log('Auth event:', event, '- clearing session');
+                    handleClearAuth(true);
+                } else {
+                    if (isResetPasswordRoute) {
+                        console.log('Ignoring state clear for event:', event, 'on reset-password route');
+                        setLoading(false);
+                        clearTimeout(authStateTimeout);
+                        return;
+                    }
+                    console.log('Auth event:', event, 'with no session - clearing state');
+                    handleClearAuth(false);
+                }
+            } finally {
+                clearTimeout(authStateTimeout);
             }
         });
 
@@ -422,6 +576,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         isActive,
         profile,
         loading,
+        authReady,
+        profileLoaded,
         logout,
         clearSession
     };
