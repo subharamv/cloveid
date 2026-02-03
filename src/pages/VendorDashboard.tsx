@@ -97,6 +97,9 @@ const VendorDashboard = () => {
                     zip_url: vr.zip_url,
                     batch_id: vr.batch_id,
                     id_card_id: vr.id_card_id,
+                    card_details_id: vr.card_details_id,
+                    request_id: vr.request_id,
+                    source_table: vr.source_table || (vr.card_details_id ? 'card_details' : 'requests'),
                     card_details: details
                 };
             }).filter(Boolean);
@@ -244,20 +247,33 @@ const VendorDashboard = () => {
 
         if (updateError) console.error('Error updating vendor_requests status:', updateError);
 
-        // 2. Update individual request if it exists - set status to 'Printed' and print_status to 'printed'
-        if (request.id && !request.batch_id) {
-            const { error: requestUpdateError } = await supabase
-                .from('requests')
+        // 2. Determine which table to update based on source or IDs present
+        let sourceTable = request.source_table || 'requests';
+        let updateId = request.request_id;
+
+        // If source_table indicates card_details, use card_details_id
+        if (sourceTable === 'card_details' && request.card_details_id) {
+            updateId = request.card_details_id;
+        } else if (!updateId && request.card_details && request.card_details.id) {
+            // Fallback: check if card_details is an object with id
+            sourceTable = 'card_details';
+            updateId = request.card_details.id;
+        }
+
+        // Update individual request/card_details - set status to 'Printed' and print_status to 'printed'
+        if (!request.batch_id && updateId) {
+            const { error: recordUpdateError } = await supabase
+                .from(sourceTable)
                 .update({ status: 'Printed', print_status: 'printed' })
-                .eq('id', request.id);
-            if (requestUpdateError) console.error('Error updating request status:', requestUpdateError);
+                .eq('id', updateId);
+            if (recordUpdateError) console.error(`Error updating ${sourceTable} status:`, recordUpdateError);
         } else if (request.batch_id) {
-            // For requests from batch, update their status to 'Printed' through card_details
-            const { error: cardDetailsError } = await supabase
-                .from('card_details')
+            // For requests from batch, update their status to 'Printed' through the appropriate table
+            const { error: batchUpdateError } = await supabase
+                .from(sourceTable)
                 .update({ status: 'Printed', print_status: 'printed' })
                 .eq('batch_id', request.batch_id);
-            if (cardDetailsError) console.error('Error updating card_details status:', cardDetailsError);
+            if (batchUpdateError) console.error(`Error updating ${sourceTable} batch status:`, batchUpdateError);
         }
 
         // 3. Update bulk card if it belongs to a batch

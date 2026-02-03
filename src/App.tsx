@@ -11,6 +11,7 @@ import Selection from "./pages/Selection";
 import BulkCardImport from "./pages/BulkCardImport";
 import MapFields from "./pages/MapFields";
 import ImportManagement from "./pages/ImportManagement";
+import CollectList from './pages/CollectList';
 import BulkCardEditor from "./pages/BulkCardEditor";
 import UserDashboardPage from "./pages/UserDashboard";
 import TrackStatus from "./pages/TrackStatus";
@@ -51,6 +52,7 @@ const App = () => (
               <Route path="/bulk-card-import" element={<BulkCardImport />} />
               <Route path="/map-fields" element={<MapFields />} />
               <Route path="/import-management" element={<ImportManagement />} />
+              <Route path="/collect" element={<CollectList />} />
               <Route path="/bulk-card-editor" element={<BulkCardEditor />} />
               <Route path="/manage-requests" element={<ManageRequests />} />
               <Route path="/edit-request/:id" element={<EditRequest />} />

@@ -336,6 +336,20 @@ const ImportManagement = () => {
                 if (vendorError) {
                     console.error('Error updating vendor request status:', vendorError);
                     // Don't fail the download if vendor_requests update fails
+                } else {
+                    // Ensure id_cards print_status is synced (redundant but guaranteed)
+                    const { error: syncError } = await supabase
+                        .from('id_cards')
+                        .update({
+                            print_status: 'printed',
+                            status: 'completed',
+                            updated_at: new Date().toISOString()
+                        })
+                        .eq('id', cardId);
+
+                    if (syncError) {
+                        console.error('Error syncing id_cards print_status:', syncError);
+                    }
                 }
 
                 // Fetch the latest print_status from database to ensure UI is up-to-date
@@ -613,6 +627,18 @@ const ImportManagement = () => {
                 if (vendorError) {
                     console.error('Error updating vendor request status:', vendorError);
                     // Don't fail the download if vendor_requests update fails
+                } else {
+                    // Ensure id_cards status is also synced (redundant but guaranteed)
+                    const { error: syncError } = await supabase
+                        .from('id_cards')
+                        .update({
+                            status: 'completed'
+                        })
+                        .in('id', cardIdsToUpdate);
+
+                    if (syncError) {
+                        console.error('Error syncing id_cards status:', syncError);
+                    }
                 }
 
                 // Fetch the latest print_status from database for all updated cards
@@ -911,6 +937,36 @@ const ImportManagement = () => {
                         .update({ status: 'completed', completed_at: new Date().toISOString() })
                         .eq('batch_id', batchId);
                 }
+            }
+        }
+    };
+
+    const handleMarkAsCollected = async (rowIndex: number) => {
+        const cardId = cardIds[rowIndex];
+        if (!cardId) {
+            toast.error('Card ID not found');
+            return;
+        }
+
+        const { data, error } = await supabase
+            .from('id_cards')
+            .update({
+                print_status: 'collected',
+                updated_at: new Date().toISOString()
+            })
+            .eq('id', cardId)
+            .select();
+
+        if (error) {
+            console.error('Error marking as collected:', error);
+            toast.error('Failed to mark card as collected');
+        } else if (data) {
+            toast.success('Card marked as collected!');
+            setCardPrintStatuses(prev => ({ ...prev, [rowIndex]: 'collected' }));
+
+            // If batchId present, check batch status (optional)
+            if (batchId) {
+                await checkAndUpdateBatchStatus(batchId);
             }
         }
     };
@@ -1286,12 +1342,25 @@ const ImportManagement = () => {
                                                         })}
                                                         <td className="px-6 py-4">
                                                             {cardPrintStatuses[i] === 'ready_to_collect' ? (
-                                                                <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
-                                                                    Ready to Collect
-                                                                </span>
+                                                                <div className="flex items-center gap-2">
+                                                                    <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
+                                                                        Ready to Collect
+                                                                    </span>
+                                                                    <button
+                                                                        onClick={() => handleMarkAsCollected(i)}
+                                                                        className="p-2 rounded-full bg-green-600 text-white hover:bg-green-700"
+                                                                        title="Mark as Collected"
+                                                                    >
+                                                                        Collected
+                                                                    </button>
+                                                                </div>
                                                             ) : cardPrintStatuses[i] === 'printed' ? (
                                                                 <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400">
                                                                     Printed
+                                                                </span>
+                                                            ) : cardPrintStatuses[i] === 'collected' ? (
+                                                                <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400">
+                                                                    Collected
                                                                 </span>
                                                             ) : cardPrintStatuses[i] === 'sent_for_printing' ? (
                                                                 <span className="px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400">

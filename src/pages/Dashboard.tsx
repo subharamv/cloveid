@@ -63,6 +63,24 @@ const Dashboard = () => {
         if (!authLoading && session && (userRole === 'admin' || userRole === 'manager')) {
             console.log('Dashboard: Auth ready, initiating data fetch');
             fetchDashboardData();
+
+            // Add window focus listener for real-time updates
+            const handleFocus = () => {
+                console.log('Dashboard: Window focused, refreshing data');
+                fetchDashboardData();
+            };
+            window.addEventListener('focus', handleFocus);
+
+            // Add interval for periodic refresh (every 15 seconds)
+            const refreshInterval = setInterval(() => {
+                console.log('Dashboard: Periodic refresh triggered');
+                fetchDashboardData();
+            }, 15000);
+
+            return () => {
+                window.removeEventListener('focus', handleFocus);
+                clearInterval(refreshInterval);
+            };
         } else if (!authLoading && (!session || !userRole)) {
             console.log('Dashboard: Auth not ready or no session, skipping fetch');
             setLoading(false);
@@ -92,8 +110,8 @@ const Dashboard = () => {
             const queries = [
                 supabase.from('requests').select('*').order('created_at', { ascending: false }).range(0, requestsPageSize - 1).abortSignal(controller.signal),
                 supabase.from('card_batches').select('*').order('created_at', { ascending: false }).range(0, batchesPageSize - 1).abortSignal(controller.signal),
-                supabase.from('requests').select('status, is_edited, batch_id').is('batch_id', null).abortSignal(controller.signal),
-                supabase.from('id_cards').select('status, print_status').abortSignal(controller.signal),
+                supabase.from('requests').select('*').abortSignal(controller.signal),
+                supabase.from('id_cards').select('*').abortSignal(controller.signal),
                 supabase.from('card_details').select('*').order('created_at', { ascending: false }).range(0, cardsPageSize - 1).abortSignal(controller.signal)
             ];
 
@@ -152,19 +170,69 @@ const Dashboard = () => {
             // Trigger stats refetch from the hook
             refetchStats();
 
-            // Calculate batch card statistics based on print_status
-            const batchCardStatistics = bulkCards?.reduce((acc, card) => {
-                if (card.print_status === 'ready_to_collect') {
-                    acc.readyToCollect++;
-                } else if (card.print_status === 'printed') {
-                    acc.printed++;
-                } else if (card.status === 'sent_for_printing' || card.print_status === 'sent_for_printing') {
-                    acc.sentForPrinting++;
-                } else {
-                    acc.pending++;
-                }
-                return acc;
-            }, { printed: 0, readyToCollect: 0, sentForPrinting: 0, pending: 0 });
+            // Calculate batch card statistics based on print_status from ALL sources (requests, card_details, id_cards)
+            let readyToCollectCount = 0;
+            let printedCount = 0;
+            let sentForPrintingCount = 0;
+            let pendingCount = 0;
+
+            // Count from requests
+            if (requestsData) {
+                requestsData.forEach((req: any) => {
+                    if (req.print_status === 'collected') {
+                        // Skip collected cards - they're done
+                    } else if (req.print_status === 'ready_to_collect') {
+                        readyToCollectCount++;
+                    } else if (req.print_status === 'printed') {
+                        printedCount++;
+                    } else if (req.print_status === 'sent_for_printing') {
+                        sentForPrintingCount++;
+                    } else {
+                        pendingCount++;
+                    }
+                });
+            }
+
+            // Count from card_details
+            if (cardDetails) {
+                cardDetails.forEach((card: any) => {
+                    if (card.print_status === 'collected') {
+                        // Skip collected cards - they're done
+                    } else if (card.print_status === 'ready_to_collect') {
+                        readyToCollectCount++;
+                    } else if (card.print_status === 'printed') {
+                        printedCount++;
+                    } else if (card.print_status === 'sent_for_printing') {
+                        sentForPrintingCount++;
+                    } else {
+                        pendingCount++;
+                    }
+                });
+            }
+
+            // Count from bulk cards (id_cards)
+            if (bulkCards) {
+                bulkCards.forEach((card: any) => {
+                    if (card.print_status === 'collected') {
+                        // Skip collected cards - they're done
+                    } else if (card.print_status === 'ready_to_collect') {
+                        readyToCollectCount++;
+                    } else if (card.print_status === 'printed') {
+                        printedCount++;
+                    } else if (card.print_status === 'sent_for_printing') {
+                        sentForPrintingCount++;
+                    } else {
+                        pendingCount++;
+                    }
+                });
+            }
+
+            const batchCardStatistics = {
+                printed: printedCount,
+                readyToCollect: readyToCollectCount,
+                sentForPrinting: sentForPrintingCount,
+                pending: pendingCount
+            };
 
             if (batchCardStatistics) setBatchStats([batchCardStatistics]);
 
@@ -357,10 +425,15 @@ const Dashboard = () => {
                                     <p className="text-3xl font-bold leading-tight tracking-[-0.033em] text-gray-900 dark:text-white">Dashboard</p>
                                     <p className="text-gray-500 dark:text-gray-400 text-base font-normal leading-normal">Welcome back, {profile?.full_name || session?.user?.user_metadata?.full_name || 'User'}! Here's an overview of your ID card batches.</p>
                                 </div>
-                                <button onClick={handleNewBatch} className="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-10 px-5 bg-primary text-white text-sm font-bold leading-normal tracking-[0.015em] gap-2">
-                                    <span className="material-symbols-outlined text-lg">add_circle</span>
-                                    <span className="truncate">Create New Batch</span>
-                                </button>
+                                <div className="flex items-center gap-3">
+                                    <button onClick={handleNewBatch} className="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-10 px-5 bg-primary text-white text-sm font-bold leading-normal tracking-[0.015em] gap-2">
+                                        <span className="material-symbols-outlined text-lg">add_circle</span>
+                                        <span className="truncate">Create New Batch</span>
+                                    </button>
+                                    <button onClick={() => navigate('/collect')} className="flex items-center gap-2 rounded-lg h-10 px-4 bg-green-600 text-white text-sm font-medium">
+                                        <span>Collect ({batchCardStats.readyToCollect})</span>
+                                    </button>
+                                </div>
                             </div>
                             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4 mb-8">
                                 <div className="flex flex-col gap-4 rounded-xl p-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">

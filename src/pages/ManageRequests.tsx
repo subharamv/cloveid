@@ -94,6 +94,20 @@ const ManageRequests = () => {
     useEffect(() => {
         fetchRequests();
         fetchVendors();
+
+        // Add window focus listener to refresh data when tab regains focus
+        const handleWindowFocus = () => {
+            fetchRequests();
+        };
+        window.addEventListener('focus', handleWindowFocus);
+
+        // Optional: Set up periodic refresh every 20 seconds
+        const refreshInterval = setInterval(fetchRequests, 20000);
+
+        return () => {
+            window.removeEventListener('focus', handleWindowFocus);
+            clearInterval(refreshInterval);
+        };
     }, []);
 
     useEffect(() => {
@@ -201,6 +215,10 @@ const ManageRequests = () => {
     }, [statusFilter, requests]);
 
     const getDisplayStatus = (request: Request) => {
+        // If collected, always show Collected regardless of other status
+        if (request.print_status === 'collected') {
+            return 'Collected';
+        }
         if (request.status === 'Pending') {
             return request.is_edited ? 'Awaiting Approval' : 'In Editing';
         }
@@ -216,8 +234,12 @@ const ManageRequests = () => {
                 return 'bg-yellow-100 text-yellow-800';
             case 'Approved':
                 return 'bg-green-100 text-green-800';
-            case 'Printed':
+            case 'Sent for Print':
                 return 'bg-blue-100 text-blue-800';
+            case 'Printed':
+                return 'bg-green-100 text-green-800';
+            case 'Collected':
+                return 'bg-gray-100 text-gray-800';
             case 'Rejected':
                 return 'bg-red-100 text-red-800';
             default:
@@ -696,6 +718,38 @@ const ManageRequests = () => {
         }
     };
 
+    const handleMarkAsCollected = async (id: number) => {
+        const request = requests.find(r => r.id === id);
+        if (!request) {
+            toast.error('Request not found');
+            return;
+        }
+
+        const tableName = request.sourceTable === 'card_details' ? 'card_details' : 'requests';
+        const { data, error } = await supabase
+            .from(tableName)
+            .update({
+                print_status: 'collected',
+                updated_at: new Date().toISOString()
+            })
+            .eq('id', id)
+            .select('*');
+
+        if (error) {
+            console.error('Error marking as collected:', error);
+            toast.error(`Failed to mark card as collected: ${error.message}`);
+        } else if (data && data.length > 0) {
+            console.log('Card marked as collected:', data[0]);
+            toast.success('Card marked as collected!');
+            setViewingRequest(null);
+
+            // Force immediate refetch after successful update
+            setTimeout(() => {
+                fetchRequests();
+            }, 500);
+        }
+    };
+
     const handleCancelPrint = async (id: number) => {
         const request = requests.find(r => r.id === id);
         if (!request) {
@@ -957,7 +1011,7 @@ const ManageRequests = () => {
                                                             <Download size={18} />
                                                         </button>
 
-                                                        {request.status === "Printed" && request.print_status !== 'ready_to_collect' ? (
+                                                        {request.status === "Printed" && request.print_status !== 'ready_to_collect' && request.print_status !== 'collected' ? (
                                                             <button
                                                                 onClick={() => handleMarkAsDone(request.id)}
                                                                 className="bg-green-500 text-white px-3 py-1 rounded-md flex items-center gap-1"
@@ -966,9 +1020,21 @@ const ManageRequests = () => {
                                                                 Done
                                                             </button>
                                                         ) : request.print_status === 'ready_to_collect' ? (
-                                                            <span className="bg-green-100 text-green-800 px-3 py-1 rounded-md text-sm font-medium flex items-center gap-1">
-                                                                <Box size={16} />
-                                                                Ready to Collect
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="bg-green-100 text-green-800 px-3 py-1 rounded-md text-sm font-medium flex items-center gap-1">
+                                                                    <Box size={16} />
+                                                                    Ready to Collect
+                                                                </span>
+                                                                <button
+                                                                    onClick={() => handleMarkAsCollected(request.id)}
+                                                                    className="bg-green-600 text-white px-3 py-1 rounded-md hover:bg-green-700"
+                                                                >
+                                                                    Collected
+                                                                </button>
+                                                            </div>
+                                                        ) : request.print_status === 'collected' ? (
+                                                            <span className="bg-gray-200 text-gray-800 px-3 py-1 rounded-md text-sm font-medium">
+                                                                Collected
                                                             </span>
                                                         ) : request.status === "Sent for Print" ? (
                                                             <button
@@ -1066,7 +1132,7 @@ const ManageRequests = () => {
                                                     <Download size={18} />
                                                 </button>
 
-                                                {request.status === "Printed" && request.print_status !== 'ready_to_collect' ? (
+                                                {request.status === "Printed" && request.print_status !== 'ready_to_collect' && request.print_status !== 'collected' ? (
                                                     <button
                                                         onClick={() => handleMarkAsDone(request.id)}
                                                         className="bg-green-500 text-white px-3 py-1 rounded-md flex items-center gap-1 text-sm"
@@ -1075,9 +1141,21 @@ const ManageRequests = () => {
                                                         Done
                                                     </button>
                                                 ) : request.print_status === 'ready_to_collect' ? (
-                                                    <span className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 px-3 py-1 rounded-md text-sm font-medium flex items-center gap-1">
-                                                        <Box size={16} />
-                                                        Ready to Collect
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 px-3 py-1 rounded-md text-sm font-medium flex items-center gap-1">
+                                                            <Box size={16} />
+                                                            Ready to Collect
+                                                        </span>
+                                                        <button
+                                                            onClick={() => handleMarkAsCollected(request.id)}
+                                                            className="bg-green-600 text-white px-3 py-1 rounded-md hover:bg-green-700 text-sm"
+                                                        >
+                                                            Collected
+                                                        </button>
+                                                    </div>
+                                                ) : request.print_status === 'collected' ? (
+                                                    <span className="bg-gray-200 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400 px-3 py-1 rounded-md text-sm font-medium">
+                                                        Collected
                                                     </span>
                                                 ) : request.status === "Sent for Print" ? (
                                                     <button
