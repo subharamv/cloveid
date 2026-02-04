@@ -57,6 +57,19 @@ const Dashboard = () => {
     const [batchesLoading, setBatchesLoading] = useState(false);
     const [cardsLoading, setCardsLoading] = useState(false);
     const [requestsLoading, setRequestsLoading] = useState(false);
+    const [refreshing, setRefreshing] = useState(false);
+
+    const lastFetchTime = useRef<number>(0);
+    const FETCH_DEBOUNCE_MS = 3000; // Minimum 3 seconds between fetches
+
+    const shouldFetch = (): boolean => {
+        const now = Date.now();
+        if (now - lastFetchTime.current > FETCH_DEBOUNCE_MS) {
+            lastFetchTime.current = now;
+            return true;
+        }
+        return false;
+    };
 
     useEffect(() => {
         // Only fetch when auth is not loading AND user is authenticated AND has proper role
@@ -64,18 +77,22 @@ const Dashboard = () => {
             console.log('Dashboard: Auth ready, initiating data fetch');
             fetchDashboardData();
 
-            // Add window focus listener for real-time updates
+            // Add window focus listener for real-time updates (debounced)
             const handleFocus = () => {
-                console.log('Dashboard: Window focused, refreshing data');
-                fetchDashboardData();
+                if (shouldFetch()) {
+                    console.log('Dashboard: Window focused, refreshing data');
+                    fetchDashboardData();
+                }
             };
             window.addEventListener('focus', handleFocus);
 
-            // Add interval for periodic refresh (every 15 seconds)
+            // Add interval for periodic refresh (every 30 seconds instead of 15)
             const refreshInterval = setInterval(() => {
-                console.log('Dashboard: Periodic refresh triggered');
-                fetchDashboardData();
-            }, 15000);
+                if (shouldFetch()) {
+                    console.log('Dashboard: Periodic refresh triggered');
+                    fetchDashboardData();
+                }
+            }, 30000);
 
             return () => {
                 window.removeEventListener('focus', handleFocus);
@@ -110,24 +127,27 @@ const Dashboard = () => {
             const queries = [
                 supabase.from('requests').select('*').order('created_at', { ascending: false }).range(0, requestsPageSize - 1).abortSignal(controller.signal),
                 supabase.from('card_batches').select('*').order('created_at', { ascending: false }).range(0, batchesPageSize - 1).abortSignal(controller.signal),
-                supabase.from('requests').select('*').abortSignal(controller.signal),
-                supabase.from('id_cards').select('*').abortSignal(controller.signal),
+                supabase.from('requests').select('*').eq('print_status', 'collected').abortSignal(controller.signal),
+                supabase.from('id_cards').select('*').eq('print_status', 'collected').abortSignal(controller.signal),
                 supabase.from('card_details').select('*').order('created_at', { ascending: false }).range(0, cardsPageSize - 1).abortSignal(controller.signal)
             ];
 
-            const results = await Promise.all(queries.map(q => q.then(res => {
-                console.log(`Dashboard: Query finished: ${res.error ? 'Error' : 'Success'}`);
-                return res;
-            }).catch(err => {
-                console.error('Dashboard: Query caught error:', err.name);
-                return { data: null, error: err };
-            })));
+            const results = await Promise.all(queries.map(async (q) => {
+                try {
+                    const res = await q;
+                    console.log(`Dashboard: Query finished: ${res.error ? 'Error' : 'Success'}`);
+                    return res;
+                } catch (err) {
+                    console.error('Dashboard: Query caught error:', err instanceof Error ? err.message : 'Unknown error');
+                    return { data: null, error: err };
+                }
+            }));
 
             const [
                 { data: recentRequests, error: requestsError },
                 { data: recentBatches, error: batchesError },
-                { data: requests, error: requestsError2 },
-                { data: bulkCards, error: bulkCardsError },
+                { data: collectedRequests, error: collectedRequestsError },
+                { data: collectedIdCards, error: collectedIdCardsError },
                 { data: cards, error: cardsError }
             ] = results;
 
@@ -159,82 +179,20 @@ const Dashboard = () => {
                 setBatchesHasMore((recentBatches || []).length === batchesPageSize);
             }
 
-            if (requestsError2) {
-                console.error('Error fetching requests stats:', requestsError2);
+            if (collectedRequestsError) {
+                console.error('Error fetching collected requests:', collectedRequestsError);
             }
 
-            if (bulkCardsError) {
-                console.error('Error fetching bulk cards stats:', bulkCardsError);
+            if (collectedIdCardsError) {
+                console.error('Error fetching collected id_cards:', collectedIdCardsError);
             }
 
             // Trigger stats refetch from the hook
             refetchStats();
 
-            // Calculate batch card statistics based on print_status from ALL sources (requests, card_details, id_cards)
-            let readyToCollectCount = 0;
-            let printedCount = 0;
-            let sentForPrintingCount = 0;
-            let pendingCount = 0;
-
-            // Count from requests
-            if (requestsData) {
-                requestsData.forEach((req: any) => {
-                    if (req.print_status === 'collected') {
-                        // Skip collected cards - they're done
-                    } else if (req.print_status === 'ready_to_collect') {
-                        readyToCollectCount++;
-                    } else if (req.print_status === 'printed') {
-                        printedCount++;
-                    } else if (req.print_status === 'sent_for_printing') {
-                        sentForPrintingCount++;
-                    } else {
-                        pendingCount++;
-                    }
-                });
-            }
-
-            // Count from card_details
-            if (cardDetails) {
-                cardDetails.forEach((card: any) => {
-                    if (card.print_status === 'collected') {
-                        // Skip collected cards - they're done
-                    } else if (card.print_status === 'ready_to_collect') {
-                        readyToCollectCount++;
-                    } else if (card.print_status === 'printed') {
-                        printedCount++;
-                    } else if (card.print_status === 'sent_for_printing') {
-                        sentForPrintingCount++;
-                    } else {
-                        pendingCount++;
-                    }
-                });
-            }
-
-            // Count from bulk cards (id_cards)
-            if (bulkCards) {
-                bulkCards.forEach((card: any) => {
-                    if (card.print_status === 'collected') {
-                        // Skip collected cards - they're done
-                    } else if (card.print_status === 'ready_to_collect') {
-                        readyToCollectCount++;
-                    } else if (card.print_status === 'printed') {
-                        printedCount++;
-                    } else if (card.print_status === 'sent_for_printing') {
-                        sentForPrintingCount++;
-                    } else {
-                        pendingCount++;
-                    }
-                });
-            }
-
-            const batchCardStatistics = {
-                printed: printedCount,
-                readyToCollect: readyToCollectCount,
-                sentForPrinting: sentForPrintingCount,
-                pending: pendingCount
-            };
-
-            if (batchCardStatistics) setBatchStats([batchCardStatistics]);
+            // No need to recalculate batch card statistics locally
+            // The hook's batchCardStats already has the correct values from all sources
+            // and correctly excludes collected cards
 
         } catch (error) {
             console.error('Error fetching dashboard data:', error);
@@ -426,6 +384,11 @@ const Dashboard = () => {
                                     <p className="text-gray-500 dark:text-gray-400 text-base font-normal leading-normal">Welcome back, {profile?.full_name || session?.user?.user_metadata?.full_name || 'User'}! Here's an overview of your ID card batches.</p>
                                 </div>
                                 <div className="flex items-center gap-3">
+                                    <button onClick={() => { if (shouldFetch()) { refetchStats(); fetchDashboardData(); } }}
+                                        className="flex min-w-[40px] h-10 px-3 items-center justify-center rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                                        title="Refresh dashboard stats">
+                                        <span className="material-symbols-outlined text-lg">refresh</span>
+                                    </button>
                                     <button onClick={handleNewBatch} className="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-10 px-5 bg-primary text-white text-sm font-bold leading-normal tracking-[0.015em] gap-2">
                                         <span className="material-symbols-outlined text-lg">add_circle</span>
                                         <span className="truncate">Create New Batch</span>
@@ -435,8 +398,8 @@ const Dashboard = () => {
                                     </button>
                                 </div>
                             </div>
-                            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4 mb-8">
-                                <div className="flex flex-col gap-4 rounded-xl p-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+                            <div className="flex flex-wrap gap-6 mb-8 lg:flex-nowrap">
+                                <div className="flex-1 min-w-0 lg:basis-1/5 flex flex-col gap-4 rounded-xl p-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:shadow-lg transition-shadow">
                                     <div className="flex items-center justify-between">
                                         <p className="text-base font-medium leading-normal text-gray-600 dark:text-gray-300">In Editing</p>
                                         <span className="material-symbols-outlined text-orange-500">edit_document</span>
@@ -444,7 +407,7 @@ const Dashboard = () => {
                                     <p className="text-3xl font-bold leading-tight tracking-tight text-gray-900 dark:text-white">{stats.inEditing}</p>
                                     <Link className="text-sm font-medium text-primary hover:underline" to="/manage-requests?status=In+Editing">View Details</Link>
                                 </div>
-                                <div className="flex flex-col gap-4 rounded-xl p-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+                                <div className="flex-1 min-w-0 lg:basis-1/5 flex flex-col gap-4 rounded-xl p-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:shadow-lg transition-shadow">
                                     <div className="flex items-center justify-between">
                                         <p className="text-base font-medium leading-normal text-gray-600 dark:text-gray-300">Awaiting Approval</p>
                                         <span className="material-symbols-outlined text-yellow-500">pending_actions</span>
@@ -452,7 +415,7 @@ const Dashboard = () => {
                                     <p className="text-3xl font-bold leading-tight tracking-tight text-gray-900 dark:text-white">{stats.awaitingApproval}</p>
                                     <Link className="text-sm font-medium text-primary hover:underline" to="/manage-requests?status=Pending">View Details</Link>
                                 </div>
-                                <div className="flex flex-col gap-4 rounded-xl p-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+                                <div className="flex-1 min-w-0 lg:basis-1/5 flex flex-col gap-4 rounded-xl p-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:shadow-lg transition-shadow">
                                     <div className="flex items-center justify-between">
                                         <p className="text-base font-medium leading-normal text-gray-600 dark:text-gray-300">Approved</p>
                                         <span className="material-symbols-outlined text-green-500">check_circle</span>
@@ -460,13 +423,21 @@ const Dashboard = () => {
                                     <p className="text-3xl font-bold leading-tight tracking-tight text-gray-900 dark:text-white">{stats.approved}</p>
                                     <Link className="text-sm font-medium text-primary hover:underline" to="/manage-requests?status=Approved">View Details</Link>
                                 </div>
-                                <div className="flex flex-col gap-4 rounded-xl p-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+                                <div className="flex-1 min-w-0 lg:basis-1/5 flex flex-col gap-4 rounded-xl p-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:shadow-lg transition-shadow">
                                     <div className="flex items-center justify-between">
                                         <p className="text-base font-medium leading-normal text-gray-600 dark:text-gray-300">Sent for Printing</p>
                                         <span className="material-symbols-outlined text-blue-500">print</span>
                                     </div>
                                     <p className="text-3xl font-bold leading-tight tracking-tight text-gray-900 dark:text-white">{stats.sentForPrinting}</p>
                                     <Link className="text-sm font-medium text-primary hover:underline" to="/manage-requests?status=Printed">View Details</Link>
+                                </div>
+                                <div className="flex-1 min-w-0 lg:basis-1/5 flex flex-col gap-4 rounded-xl p-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:shadow-lg transition-shadow">
+                                    <div className="flex items-center justify-between">
+                                        <p className="text-base font-medium leading-normal text-gray-600 dark:text-gray-300">Collected</p>
+                                        <span className="material-symbols-outlined text-purple-500">inventory_2</span>
+                                    </div>
+                                    <p className="text-3xl font-bold leading-tight tracking-tight text-gray-900 dark:text-white">{batchCardStats.collected}</p>
+                                    <Link className="text-sm font-medium text-primary hover:underline" to="/collect">View Details</Link>
                                 </div>
                             </div>
 
@@ -480,39 +451,48 @@ const Dashboard = () => {
                                 )}
                             </div>
 
-                            <h3 className="text-lg font-semibold leading-tight tracking-[-0.015em] text-gray-900 dark:text-white px-1 pb-2 pt-5">Batch Card Statistics</h3>
-                            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4 mb-8">
-                                <div className="flex flex-col gap-4 rounded-xl p-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+                            <h3 className="text-lg font-semibold leading-tight tracking-[-0.015em] text-gray-900 dark:text-white px-1 pb-2 pt-5">Card Progress Tracking</h3>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 px-1 pb-4">Track all cards through each stage of the printing and collection process</p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
+                                <div className="flex flex-col gap-4 rounded-xl p-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:shadow-lg transition-shadow">
                                     <div className="flex items-center justify-between">
-                                        <p className="text-base font-medium leading-normal text-gray-600 dark:text-gray-300">Pending</p>
+                                        <p className="text-base font-medium leading-normal text-gray-600 dark:text-gray-300">Not Printed</p>
                                         <span className="material-symbols-outlined text-gray-500">pending</span>
                                     </div>
                                     <p className="text-3xl font-bold leading-tight tracking-tight text-gray-900 dark:text-white">{batchCardStats.pending}</p>
-                                    <p className="text-sm text-gray-500 dark:text-gray-400">Cards not yet sent to print</p>
+                                    <p className="text-sm text-gray-500 dark:text-gray-400">Not yet sent to vendor</p>
                                 </div>
-                                <div className="flex flex-col gap-4 rounded-xl p-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+                                <div className="flex flex-col gap-4 rounded-xl p-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:shadow-lg transition-shadow">
                                     <div className="flex items-center justify-between">
-                                        <p className="text-base font-medium leading-normal text-gray-600 dark:text-gray-300">Sent for Printing</p>
+                                        <p className="text-base font-medium leading-normal text-gray-600 dark:text-gray-300">Sent to Vendor</p>
                                         <span className="material-symbols-outlined text-yellow-500">print</span>
                                     </div>
                                     <p className="text-3xl font-bold leading-tight tracking-tight text-gray-900 dark:text-white">{batchCardStats.sentForPrinting}</p>
-                                    <p className="text-sm text-gray-500 dark:text-gray-400">Cards with vendor</p>
+                                    <p className="text-sm text-gray-500 dark:text-gray-400">Being processed by vendor</p>
                                 </div>
-                                <div className="flex flex-col gap-4 rounded-xl p-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+                                <div className="flex flex-col gap-4 rounded-xl p-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:shadow-lg transition-shadow">
                                     <div className="flex items-center justify-between">
                                         <p className="text-base font-medium leading-normal text-gray-600 dark:text-gray-300">Printed</p>
                                         <span className="material-symbols-outlined text-blue-500">local_printshop</span>
                                     </div>
                                     <p className="text-3xl font-bold leading-tight tracking-tight text-gray-900 dark:text-white">{batchCardStats.printed}</p>
-                                    <p className="text-sm text-gray-500 dark:text-gray-400">Cards printed by vendor</p>
+                                    <p className="text-sm text-gray-500 dark:text-gray-400">Completed by vendor</p>
                                 </div>
-                                <div className="flex flex-col gap-4 rounded-xl p-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+                                <div className="flex flex-col gap-4 rounded-xl p-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:shadow-lg transition-shadow">
                                     <div className="flex items-center justify-between">
                                         <p className="text-base font-medium leading-normal text-gray-600 dark:text-gray-300">Ready to Collect</p>
                                         <span className="material-symbols-outlined text-green-500">task_alt</span>
                                     </div>
                                     <p className="text-3xl font-bold leading-tight tracking-tight text-gray-900 dark:text-white">{batchCardStats.readyToCollect}</p>
-                                    <p className="text-sm text-gray-500 dark:text-gray-400">Cards ready for pickup</p>
+                                    <p className="text-sm text-gray-500 dark:text-gray-400">Available for pickup</p>
+                                </div>
+                                <div className="flex flex-col gap-4 rounded-xl p-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:shadow-lg transition-shadow">
+                                    <div className="flex items-center justify-between">
+                                        <p className="text-base font-medium leading-normal text-gray-600 dark:text-gray-300">Collected</p>
+                                        <span className="material-symbols-outlined text-purple-500">inventory_2</span>
+                                    </div>
+                                    <p className="text-3xl font-bold leading-tight tracking-tight text-gray-900 dark:text-white">{batchCardStats.collected}</p>
+                                    <p className="text-sm text-gray-500 dark:text-gray-400">Successfully collected</p>
                                 </div>
                             </div>
 

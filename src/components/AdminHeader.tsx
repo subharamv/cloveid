@@ -50,6 +50,9 @@ const AdminHeader: React.FC<AdminHeaderProps> = ({ setIsSidebarOpen, activeTab }
                                 <Link to="/user-management">User Management</Link>
                             </DropdownMenuItem>
                             <DropdownMenuItem>
+                                <Link to="/issued-cards">Issued ID Cards</Link>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem>
                                 <Link to="/department-management">Department Management</Link>
                             </DropdownMenuItem>
                             <DropdownMenuItem>

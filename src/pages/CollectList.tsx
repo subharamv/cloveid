@@ -13,32 +13,45 @@ interface CollectItem {
     print_status?: string;
     batch_id?: string | null;
     processed_date?: string;
+    collected_at?: string;
     raw?: any;
 }
 
 const CollectList = () => {
-    const [items, setItems] = useState<CollectItem[]>([]);
+    const [toCollectItems, setToCollectItems] = useState<CollectItem[]>([]);
+    const [collectedItems, setCollectedItems] = useState<CollectItem[]>([]);
     const [loading, setLoading] = useState(false);
     const [selected, setSelected] = useState<number[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
     const [itemsPerPage, setItemsPerPage] = useState(30);
+    const [activeTab, setActiveTab] = useState<'to-collect' | 'collected'>('to-collect');
     const navigate = useNavigate();
 
     const fetchItems = async () => {
         setLoading(true);
         try {
+            // Fetch to-collect items (only ready_to_collect status)
             const [reqRes, cardDetailsRes, idCardsRes] = await Promise.all([
-                supabase.from('requests').select('*').neq('print_status', 'collected'),
-                supabase.from('card_details').select('*').neq('print_status', 'collected'),
-                supabase.from('id_cards').select('*').neq('print_status', 'collected')
+                supabase.from('requests').select('*').eq('print_status', 'ready_to_collect'),
+                supabase.from('card_details').select('*').eq('print_status', 'ready_to_collect'),
+                supabase.from('id_cards').select('*').eq('print_status', 'ready_to_collect')
             ]);
 
-            const unified: CollectItem[] = [];
+            // Fetch collected items
+            const [collReqRes, collCardDetailsRes, collIdCardsRes] = await Promise.all([
+                supabase.from('requests').select('*').eq('print_status', 'collected'),
+                supabase.from('card_details').select('*').eq('print_status', 'collected'),
+                supabase.from('id_cards').select('*').eq('print_status', 'collected')
+            ]);
 
+            const toCollect: CollectItem[] = [];
+            const collected: CollectItem[] = [];
+
+            // Process to-collect items
             if (reqRes.data) {
                 reqRes.data.forEach((r: any) => {
-                    unified.push({
+                    toCollect.push({
                         id: r.id,
                         source: 'requests',
                         name: r.full_name || r.name,
@@ -54,7 +67,7 @@ const CollectList = () => {
 
             if (cardDetailsRes.data) {
                 cardDetailsRes.data.forEach((r: any) => {
-                    unified.push({
+                    toCollect.push({
                         id: r.id,
                         source: 'card_details',
                         name: r.full_name,
@@ -72,7 +85,7 @@ const CollectList = () => {
                 idCardsRes.data.forEach((r: any) => {
                     // Parse card_data if it's a string
                     const cardData = typeof r.card_data === 'string' ? JSON.parse(r.card_data) : r.card_data;
-                    unified.push({
+                    toCollect.push({
                         id: r.id,
                         source: 'id_cards',
                         name: cardData?.['Full Name'] || cardData?.fullName || cardData?.name || 'Bulk Card',
@@ -86,7 +99,62 @@ const CollectList = () => {
                 });
             }
 
-            setItems(unified);
+            // Process collected items
+            if (collReqRes.data) {
+                collReqRes.data.forEach((r: any) => {
+                    collected.push({
+                        id: r.id,
+                        source: 'requests',
+                        name: r.full_name || r.name,
+                        employeeId: r.employee_id,
+                        date: r.created_at && new Date(r.created_at).toLocaleDateString(),
+                        print_status: r.print_status,
+                        batch_id: r.batch_id || null,
+                        processed_date: r.updated_at && new Date(r.updated_at).toLocaleDateString(),
+                        collected_at: r.updated_at ? `${new Date(r.updated_at).toLocaleDateString()} ${new Date(r.updated_at).toLocaleTimeString()}` : '-',
+                        raw: r
+                    });
+                });
+            }
+
+            if (collCardDetailsRes.data) {
+                collCardDetailsRes.data.forEach((r: any) => {
+                    collected.push({
+                        id: r.id,
+                        source: 'card_details',
+                        name: r.full_name,
+                        employeeId: r.employee_id,
+                        date: r.created_at && new Date(r.created_at).toLocaleDateString(),
+                        print_status: r.print_status,
+                        batch_id: null,
+                        processed_date: r.updated_at && new Date(r.updated_at).toLocaleDateString(),
+                        collected_at: r.updated_at ? `${new Date(r.updated_at).toLocaleDateString()} ${new Date(r.updated_at).toLocaleTimeString()}` : '-',
+                        raw: r
+                    });
+                });
+            }
+
+            if (collIdCardsRes.data) {
+                collIdCardsRes.data.forEach((r: any) => {
+                    // Parse card_data if it's a string
+                    const cardData = typeof r.card_data === 'string' ? JSON.parse(r.card_data) : r.card_data;
+                    collected.push({
+                        id: r.id,
+                        source: 'id_cards',
+                        name: cardData?.['Full Name'] || cardData?.fullName || cardData?.name || 'Bulk Card',
+                        employeeId: cardData?.['Employee ID'] || cardData?.employeeId || r.employee_id,
+                        date: r.created_at && new Date(r.created_at).toLocaleDateString(),
+                        print_status: r.print_status,
+                        batch_id: r.batch_id || null,
+                        processed_date: r.updated_at && new Date(r.updated_at).toLocaleDateString(),
+                        collected_at: r.updated_at ? `${new Date(r.updated_at).toLocaleDateString()} ${new Date(r.updated_at).toLocaleTimeString()}` : '-',
+                        raw: r
+                    });
+                });
+            }
+
+            setToCollectItems(toCollect);
+            setCollectedItems(collected);
         } catch (error) {
             console.error('Error fetching collect list:', error);
             toast.error('Failed to load collect list');
@@ -112,10 +180,16 @@ const CollectList = () => {
     };
 
     const toggleSelectAll = () => {
-        if (selected.length === items.length) {
+        const items = activeTab === 'to-collect' ? toCollectItems : collectedItems;
+        const filteredItems = items.filter(item =>
+            item.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            item.employeeId?.toLowerCase().includes(searchTerm.toLowerCase())
+        );
+
+        if (selected.length === filteredItems.length) {
             setSelected([]);
         } else {
-            setSelected(items.map(item => item.id));
+            setSelected(filteredItems.map(item => item.id));
         }
     };
 
@@ -164,6 +238,9 @@ const CollectList = () => {
         }
     };
 
+    // Get the correct items based on active tab
+    const items = activeTab === 'to-collect' ? toCollectItems : collectedItems;
+
     // Filter items based on search term
     const filteredItems = items.filter(item =>
         item.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -189,8 +266,30 @@ const CollectList = () => {
                         <h1 className="text-2xl font-bold">Cards Collection Management</h1>
                         <div className="flex items-center gap-2">
                             <button onClick={() => navigate('/dashboard')} className="px-4 py-2 rounded bg-gray-100">Back</button>
-                            <button onClick={bulkMarkCollected} disabled={selected.length === 0} className="px-4 py-2 rounded bg-green-600 text-white">Mark Selected Collected ({selected.length})</button>
+                            <button onClick={bulkMarkCollected} disabled={selected.length === 0 || activeTab === 'collected'} className="px-4 py-2 rounded bg-green-600 text-white disabled:opacity-50 disabled:cursor-not-allowed">Mark Selected Collected ({selected.length})</button>
                         </div>
+                    </div>
+
+                    {/* Tab Navigation */}
+                    <div className="mb-6 flex border-b">
+                        <button
+                            onClick={() => { setActiveTab('to-collect'); setCurrentPage(1); setSelected([]); }}
+                            className={`px-6 py-3 font-medium border-b-2 transition-colors ${activeTab === 'to-collect'
+                                ? 'border-green-600 text-green-600'
+                                : 'border-transparent text-gray-600 hover:text-gray-900'
+                                }`}
+                        >
+                            Ready to Collect ({toCollectItems.length})
+                        </button>
+                        <button
+                            onClick={() => { setActiveTab('collected'); setCurrentPage(1); setSelected([]); }}
+                            className={`px-6 py-3 font-medium border-b-2 transition-colors ${activeTab === 'collected'
+                                ? 'border-green-600 text-green-600'
+                                : 'border-transparent text-gray-600 hover:text-gray-900'
+                                }`}
+                        >
+                            Collected ({collectedItems.length})
+                        </button>
                     </div>
 
                     {/* Search Bar */}
@@ -228,29 +327,38 @@ const CollectList = () => {
                         <table className="w-full">
                             <thead>
                                 <tr className="bg-gray-50">
-                                    <th className="px-4 py-3 text-left">
-                                        <input
-                                            type="checkbox"
-                                            checked={items.length > 0 && selected.length === items.length}
-                                            onChange={toggleSelectAll}
-                                            title="Select All"
-                                        />
-                                    </th>
+                                    {activeTab === 'to-collect' && (
+                                        <th className="px-4 py-3 text-left">
+                                            <input
+                                                type="checkbox"
+                                                checked={filteredItems.length > 0 && selected.length === filteredItems.length}
+                                                onChange={toggleSelectAll}
+                                                title="Select All"
+                                            />
+                                        </th>
+                                    )}
                                     <th className="px-4 py-3 text-left">Name</th>
                                     <th className="px-4 py-3 text-left">Employee ID</th>
                                     <th className="px-4 py-3 text-left">Source</th>
                                     <th className="px-4 py-3 text-left">Status</th>
                                     <th className="px-4 py-3 text-left">Batch</th>
-                                    <th className="px-4 py-3 text-left">Processed Date</th>
+                                    {activeTab === 'to-collect' && (
+                                        <th className="px-4 py-3 text-left">Processed Date</th>
+                                    )}
+                                    {activeTab === 'collected' && (
+                                        <th className="px-4 py-3 text-left">Collection Time</th>
+                                    )}
                                     <th className="px-4 py-3 text-right">Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {paginatedItems.map(item => (
                                     <tr key={`${item.source}-${item.id}`} className="border-t">
-                                        <td className="px-4 py-3">
-                                            <input type="checkbox" checked={selected.includes(item.id)} onChange={() => toggleSelect(item.id)} />
-                                        </td>
+                                        {activeTab === 'to-collect' && (
+                                            <td className="px-4 py-3">
+                                                <input type="checkbox" checked={selected.includes(item.id)} onChange={() => toggleSelect(item.id)} />
+                                            </td>
+                                        )}
                                         <td className="px-4 py-3">{item.name}</td>
                                         <td className="px-4 py-3">{item.employeeId}</td>
                                         <td className="px-4 py-3">{getSourceLabel(item.source)}</td>
@@ -265,14 +373,24 @@ const CollectList = () => {
                                             </span>
                                         </td>
                                         <td className="px-4 py-3">{item.batch_id || '-'}</td>
-                                        <td className="px-4 py-3">{item.processed_date || '-'}</td>
+                                        {activeTab === 'to-collect' && (
+                                            <td className="px-4 py-3">{item.processed_date || '-'}</td>
+                                        )}
+                                        {activeTab === 'collected' && (
+                                            <td className="px-4 py-3">{item.collected_at || '-'}</td>
+                                        )}
                                         <td className="px-4 py-3 text-right">
-                                            <button onClick={() => markCollected(item)} className="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700">Mark Collected</button>
+                                            {activeTab === 'to-collect' && (
+                                                <button onClick={() => markCollected(item)} className="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700">Mark Collected</button>
+                                            )}
+                                            {activeTab === 'collected' && (
+                                                <span className="text-gray-600 text-sm">Collected</span>
+                                            )}
                                         </td>
                                     </tr>
                                 ))}
                                 {paginatedItems.length === 0 && (
-                                    <tr><td colSpan={8} className="px-4 py-6 text-center text-gray-500">
+                                    <tr><td colSpan={activeTab === 'to-collect' ? 9 : 8} className="px-4 py-6 text-center text-gray-500">
                                         {searchTerm ? 'No cards match your search' : 'No cards found'}
                                     </td></tr>
                                 )}
@@ -297,8 +415,8 @@ const CollectList = () => {
                                         key={page}
                                         onClick={() => setCurrentPage(page)}
                                         className={`px-3 py-2 rounded ${currentPage === page
-                                                ? 'bg-green-600 text-white'
-                                                : 'border hover:bg-gray-100'
+                                            ? 'bg-green-600 text-white'
+                                            : 'border hover:bg-gray-100'
                                             }`}
                                     >
                                         {page}

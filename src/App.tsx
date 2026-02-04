@@ -23,6 +23,7 @@ import Profile from "./pages/Profile";
 import Unauthorized from "./pages/Unauthorized";
 import Vendor from "./pages/Vendor";
 import UserManagement from "./pages/UserManagement";
+import IssuedCards from './pages/IssuedCards';
 import VendorDashboard from './pages/VendorDashboard';
 import DepartmentManagement from './pages/DepartmentManagement';
 import BrandingSettings from './pages/BrandingSettings';
@@ -59,6 +60,7 @@ const App = () => (
               <Route path="/add-employee" element={<AddEmployee />} />
               <Route path="/vendor" element={<Vendor />} />
               <Route path="/user-management" element={<UserManagement />} />
+              <Route path="/issued-cards" element={<IssuedCards />} />
               <Route path="/department-management" element={<DepartmentManagement />} />
               <Route path="/settings/branding" element={<BrandingSettings />} />
             </Route>
