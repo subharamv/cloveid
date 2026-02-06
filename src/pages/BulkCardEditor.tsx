@@ -24,7 +24,7 @@ const BulkCardEditor: React.FC = () => {
     const location = useLocation();
     const navigate = useNavigate();
     const { logout } = useAuth();
-    const { rowData, headers, rowIndex, csvData, zipUrls, cardId, batchId, cardIds } = location.state || { rowData: [], headers: [], rowIndex: -1, csvData: [], zipUrls: {}, cardId: null, batchId: null, cardIds: {} };
+    const { rowData, headers, rowIndex, csvData, zipUrls, cardId, batchId, cardIds, cardPrintStatuses = {} } = location.state || { rowData: [], headers: [], rowIndex: -1, csvData: [], zipUrls: {}, cardId: null, batchId: null, cardIds: {}, cardPrintStatuses: {} };
 
     const { downloadZip } = useDownloadZip();
     const [isSidebarOpen, setSidebarOpen] = useState(false);
@@ -81,10 +81,70 @@ const BulkCardEditor: React.FC = () => {
 
             try {
                 if (imageUrl.startsWith('http')) {
-                    processedImageUrl = cld.image(imageUrl)
-                        .setDeliveryType('fetch')
-                        .effect(backgroundRemoval())
-                        .toURL();
+                    // Check if the image has the broken fetch delivery pattern (causes 401 errors)
+                    const hasFetchDelivery = imageUrl.includes('image/fetch/');
+
+                    let urlToProcess = imageUrl;
+
+                    if (hasFetchDelivery) {
+                        // Extract the original URL from the fetch delivery URL
+                        // Pattern: https://res.cloudinary.com/.../image/fetch/.../{original_url}?...
+                        const fetchMatch = imageUrl.match(/image\/fetch\/(?:.*?\/)?(https:\/\/[^\s?]+)/);
+                        if (fetchMatch && fetchMatch[1]) {
+                            urlToProcess = fetchMatch[1];
+                        } else {
+                            // If we can't extract, throw error to use original fallback
+                            throw new Error('Fetch delivery URLs are not supported. Reprocessing image.');
+                        }
+                    }
+
+                    // Check if the image already has background removal applied (non-fetch method)
+                    const hasBackgroundRemoval = imageUrl.includes('e_background_removal') || imageUrl.includes('e_bgremoval');
+
+                    if (hasBackgroundRemoval && !hasFetchDelivery) {
+                        // Image is already processed with a proper method, load it directly
+                        processedImageUrl = imageUrl;
+                    } else {
+                        // For HTTP URLs, download and upload to Cloudinary for processing
+                        if (!uploadPreset) {
+                            throw new Error('Cloudinary upload preset is missing. Cannot process image.');
+                        }
+
+                        // Download the image as a blob
+                        const response = await fetch(urlToProcess);
+                        if (!response.ok) {
+                            throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
+                        }
+                        const blob = await response.blob();
+
+                        // Convert blob to data URL
+                        const reader = new FileReader();
+                        const dataUrlPromise = new Promise<string>((resolve, reject) => {
+                            reader.onload = () => resolve(reader.result as string);
+                            reader.onerror = reject;
+                            reader.readAsDataURL(blob);
+                        });
+                        const dataUrl = await dataUrlPromise;
+
+                        // Upload to Cloudinary with background removal
+                        const uploadFormData = new FormData();
+                        uploadFormData.append('file', dataUrl);
+                        uploadFormData.append('upload_preset', uploadPreset);
+
+                        const uploadResponse = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
+                            method: 'POST',
+                            body: uploadFormData
+                        });
+                        const uploadData = await uploadResponse.json();
+
+                        if (uploadData.public_id) {
+                            processedImageUrl = cld.image(uploadData.public_id)
+                                .effect(backgroundRemoval())
+                                .toURL();
+                        } else {
+                            throw new Error(uploadData?.error?.message ?? 'Invalid Cloudinary response after upload.');
+                        }
+                    }
                 } else if (imageUrl.startsWith('data:image')) {
                     if (!uploadPreset) {
                         toast.error('Cloudinary upload preset is missing. Cannot process uploaded image.');
@@ -159,7 +219,7 @@ const BulkCardEditor: React.FC = () => {
             try {
                 const frontLogoUrl = await imageToDataUrl(cloveLogo);
                 setFrontLogoDataUrl(frontLogoUrl);
-                
+
                 const backLogoUrl = await imageToDataUrl(backLogoSvg);
                 setBackLogoDataUrl(backLogoUrl);
             } catch (error) {
@@ -437,7 +497,7 @@ const BulkCardEditor: React.FC = () => {
         try {
             const canvas = canvasRef.current;
             let updatedEmployee = { ...employee };
-            
+
             if (canvas) {
                 // Ensure the canvas is up to date with latest transforms
                 drawEditor();
@@ -446,7 +506,7 @@ const BulkCardEditor: React.FC = () => {
             }
 
             const blob = await generateZip();
-            
+
             // Upload ZIP to Supabase Storage
             const zipFileName = `zips/${employee.fullName.replace(/ /g, '_')}_${employee.employeeId}_ID_Card.zip`;
             const { error: zipError } = await supabase.storage
@@ -460,9 +520,12 @@ const BulkCardEditor: React.FC = () => {
                 .getPublicUrl(zipFileName);
 
             const finalZipUrl = publicUrlData.publicUrl;
-            
+
+            // Filter out broken fetch delivery URLs - don't store them
+            const safeFotoUrl = photoUrl && !photoUrl.includes('image/fetch/') ? photoUrl : null;
+
             // Update updatedEmployee with photoUrl and zipUrl
-            updatedEmployee.photo_url = photoUrl;
+            updatedEmployee.photo_url = safeFotoUrl;
             updatedEmployee.zip_url = finalZipUrl;
 
             // Update database if cardId exists
@@ -479,10 +542,12 @@ const BulkCardEditor: React.FC = () => {
                     'photo (upload)': 'photo',
                 };
 
-                const newCardData = { ...rowData.reduce((acc: any, val: any, idx: number) => {
-                    acc[headers[idx]] = val;
-                    return acc;
-                }, {}) };
+                const newCardData = {
+                    ...rowData.reduce((acc: any, val: any, idx: number) => {
+                        acc[headers[idx]] = val;
+                        return acc;
+                    }, {})
+                };
 
                 headers.forEach((header: string, idx: number) => {
                     const key = String(header || '').trim().toLowerCase();
@@ -492,14 +557,14 @@ const BulkCardEditor: React.FC = () => {
                     }
                 });
 
-                newCardData['photo_url'] = photoUrl;
+                newCardData['photo_url'] = safeFotoUrl;
                 newCardData['zip_url'] = finalZipUrl;
 
                 const { error: dbError } = await supabase
                     .from('id_cards')
                     .update({
                         card_data: newCardData,
-                        photo_url: photoUrl,
+                        photo_url: safeFotoUrl,
                         zip_url: finalZipUrl
                     } as any)
                     .eq('id', cardId);
@@ -511,17 +576,18 @@ const BulkCardEditor: React.FC = () => {
             }
 
             toast.success('Changes saved! Returning to management...');
-            navigate('/import-management', { 
-                state: { 
-                    updatedEmployee, 
-                    rowIndex, 
-                    zipUrl: finalZipUrl, 
-                    csvData, 
-                    headers, 
+            navigate('/import-management', {
+                state: {
+                    updatedEmployee,
+                    rowIndex,
+                    zipUrl: finalZipUrl,
+                    csvData,
+                    headers,
                     zipUrls,
                     cardIds,
+                    cardPrintStatuses,
                     batchId
-                } 
+                }
             });
         } catch (error) {
             console.error('Error in handleSaveAndBack:', error);
@@ -533,7 +599,7 @@ const BulkCardEditor: React.FC = () => {
 
     const generateZip = async () => {
         toast.info('Generating ZIP file...');
-        
+
         // Ensure we have the latest DOM state
         await new Promise(resolve => setTimeout(resolve, 500));
 

@@ -133,8 +133,29 @@ const ImportManagement = () => {
                     // Reconstruct headers and csvData
                     const firstCardData = cards[0].card_data;
                     const loadedHeaders = Object.keys(firstCardData).filter(h => h !== 'zip_url');
-                    const loadedCsvData = cards.map(card => {
-                        return loadedHeaders.map(h => card.card_data[h]);
+
+                    // Get photo column index for later use
+                    const lowerHeaders = loadedHeaders.map(h => String(h || '').toLowerCase());
+                    const photoIndex = lowerHeaders.indexOf('photo (upload)') !== -1 ? lowerHeaders.indexOf('photo (upload)') :
+                        lowerHeaders.indexOf('image') !== -1 ? lowerHeaders.indexOf('image') :
+                            lowerHeaders.indexOf('photo');
+
+                    const loadedCsvData = cards.map((card, cardIdx) => {
+                        let row = loadedHeaders.map(h => card.card_data[h]);
+
+                        // Filter out broken fetch delivery URLs from card_data
+                        if (photoIndex !== -1 && typeof row[photoIndex] === 'string') {
+                            if (row[photoIndex].includes('image/fetch/')) {
+                                row[photoIndex] = ''; // Clear broken fetch URLs
+                            }
+                        }
+
+                        // Use photo_url from database only if it's NOT a broken fetch delivery URL
+                        if (photoIndex !== -1 && card.photo_url && !card.photo_url.includes('image/fetch/')) {
+                            row[photoIndex] = card.photo_url;
+                        }
+                        // Otherwise, use the filtered card_data image or keep it empty
+                        return row;
                     });
 
                     const loadedZipUrls: Record<number, string> = {};
@@ -167,7 +188,7 @@ const ImportManagement = () => {
     }, [location.state]);
 
     useEffect(() => {
-        const { updatedEmployee, rowIndex, zipUrl, csvData: updatedCsvData, headers: updatedHeaders, cardIds: updatedCardIds, batchId: updatedBatchId } = location.state || {};
+        const { updatedEmployee, rowIndex, zipUrl, csvData: updatedCsvData, headers: updatedHeaders, cardIds: updatedCardIds, batchId: updatedBatchId, cardPrintStatuses: receivedPrintStatuses } = location.state || {};
 
         if (updatedCsvData) {
             setCsvData(updatedCsvData);
@@ -179,6 +200,9 @@ const ImportManagement = () => {
             }
             if (updatedBatchId) {
                 setBatchId(updatedBatchId);
+            }
+            if (receivedPrintStatuses) {
+                setCardPrintStatuses(receivedPrintStatuses);
             }
 
             const dataToUpdate = updatedCsvData || initialCsvData;
@@ -222,6 +246,7 @@ const ImportManagement = () => {
 
                 const currentCardIds = updatedCardIds || cardIds;
                 const currentBatchId = updatedBatchId || batchId;
+                const currentPrintStatuses = receivedPrintStatuses || cardPrintStatuses;
 
                 navigate(location.pathname, {
                     replace: true,
@@ -230,6 +255,7 @@ const ImportManagement = () => {
                         headers: headersToUse,
                         zipUrls: currentZipUrls,
                         cardIds: currentCardIds,
+                        cardPrintStatuses: currentPrintStatuses,
                         batchId: currentBatchId
                     }
                 });
@@ -292,7 +318,7 @@ const ImportManagement = () => {
 
     const handleEdit = (rowData: string[], rowIndex: number) => {
         const cardId = cardIds[rowIndex];
-        navigate('/bulk-card-editor', { state: { rowData, headers, rowIndex, csvData, zipUrls, cardId, batchId, cardIds } });
+        navigate('/bulk-card-editor', { state: { rowData, headers, rowIndex, csvData, zipUrls, cardId, batchId, cardIds, cardPrintStatuses } });
     };
 
     const handleDownload = async (rowData: string[], rowIndex: number) => {
@@ -1305,7 +1331,16 @@ const ImportManagement = () => {
                                                         {row.map((cell, j) => {
                                                             if (j === photoColumnIndex) {
                                                                 if (typeof cell === 'string') {
-                                                                    if (cell.startsWith('blob:')) {
+                                                                    // Don't try to load broken fetch delivery URLs
+                                                                    if (cell.includes('image/fetch/')) {
+                                                                        return (
+                                                                            <td key={j} className="px-6 py-4">
+                                                                                <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-xs text-gray-500">
+                                                                                    -
+                                                                                </div>
+                                                                            </td>
+                                                                        );
+                                                                    } else if (cell.startsWith('blob:')) {
                                                                         // Legacy blob URL in cell - show placeholder
                                                                         return (
                                                                             <td key={j} className="px-6 py-4">
