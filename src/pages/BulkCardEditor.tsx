@@ -15,10 +15,15 @@ import cloveLogo from '@/assets/CLOVE LOGO BLACK.png';
 import backLogoSvg from '@/assets/logo svg.png';
 import { Cloudinary } from '@cloudinary/url-gen';
 import { backgroundRemoval } from '@cloudinary/url-gen/actions/effect';
-import { imageToDataUrl } from '@/lib/utils';
+import { scale } from "@cloudinary/url-gen/actions/resize";
+import { quality, format } from "@cloudinary/url-gen/actions/delivery";
+import { auto } from "@cloudinary/url-gen/qualifiers/quality";
+import { auto as autoFormat } from "@cloudinary/url-gen/qualifiers/format";
+import { imageToDataUrl, compressImage } from '@/lib/utils';
 import AdminHeader from '../components/AdminHeader';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabaseClient';
+import { ProgressBar } from '@/components/ProgressBar';
 
 const BulkCardEditor: React.FC = () => {
     const location = useLocation();
@@ -33,6 +38,9 @@ const BulkCardEditor: React.FC = () => {
     const [isSaving, setIsSaving] = useState(false);
     const [frontLogoDataUrl, setFrontLogoDataUrl] = useState<string>('');
     const [backLogoDataUrl, setBackLogoDataUrl] = useState<string>('');
+    const [saveProgress, setSaveProgress] = useState(0);
+    const [showSaveProgress, setShowSaveProgress] = useState(false);
+    const [isLoadingImage, setIsLoadingImage] = useState(false);
 
     const frontCardRef = useRef<HTMLDivElement>(null);
     const backCardRef = useRef<HTMLDivElement>(null);
@@ -56,17 +64,22 @@ const BulkCardEditor: React.FC = () => {
                 const img = new Image();
                 img.crossOrigin = 'anonymous';
                 img.onload = () => {
+                    console.log(`✓ Image loaded successfully from: ${img.src}`);
                     setEditor(prev => ({ ...prev, img, scale: 1, rotation: 0, tx: 0, ty: 0 }));
+                    setPhotoUrl(img.src);
                     setShowUploadNote(false);
                 };
                 img.onerror = () => {
-                    if (fallbackUrl) {
+                    console.error(`✗ Failed to load image from: ${url}`);
+                    if (fallbackUrl && url !== fallbackUrl) {
+                        console.log(`↻ Attempting fallback image: ${fallbackUrl}`);
                         toast.error('Failed to load processed image. Loading original.');
-                        loadImage(fallbackUrl);
+                        img.src = fallbackUrl;
                     } else {
                         toast.error(`Failed to load image from URL: ${url}`);
                     }
                 };
+                console.log(`→ Loading image from: ${url}`);
                 img.src = url;
             };
 
@@ -117,12 +130,18 @@ const BulkCardEditor: React.FC = () => {
                         }
                         const blob = await response.blob();
 
-                        // Convert blob to data URL
+                        // Compress the blob before uploading
+                        const blobFile = new File([blob], 'image.jpg', { type: blob.type });
+                        const compressedFile = await compressImage(blobFile);
+
+                        console.log(`Processing image: Original ${(blob.size / (1024 * 1024)).toFixed(2)}MB → Compressed ${(compressedFile.size / (1024 * 1024)).toFixed(2)}MB`);
+
+                        // Convert compressed file to data URL
                         const reader = new FileReader();
                         const dataUrlPromise = new Promise<string>((resolve, reject) => {
                             reader.onload = () => resolve(reader.result as string);
                             reader.onerror = reject;
-                            reader.readAsDataURL(blob);
+                            reader.readAsDataURL(compressedFile);
                         });
                         const dataUrl = await dataUrlPromise;
 
@@ -137,10 +156,22 @@ const BulkCardEditor: React.FC = () => {
                         });
                         const uploadData = await uploadResponse.json();
 
+                        console.log(`Cloudinary response:`, uploadData);
+
+                        if (!uploadResponse.ok) {
+                            console.error(`Cloudinary upload failed: ${uploadResponse.status}`, uploadData.error);
+                            throw new Error(uploadData?.error?.message ?? `Upload failed with status ${uploadResponse.status}`);
+                        }
+
                         if (uploadData.public_id) {
+                            console.log(`✓ Image uploaded with public_id: ${uploadData.public_id}`);
                             processedImageUrl = cld.image(uploadData.public_id)
                                 .effect(backgroundRemoval())
+                                .resize(scale().width(1000))
+                                .delivery(quality(auto()))
+                                .delivery(format(autoFormat()))
                                 .toURL();
+                            console.log(`Generated Cloudinary URL: ${processedImageUrl}`);
                         } else {
                             throw new Error(uploadData?.error?.message ?? 'Invalid Cloudinary response after upload.');
                         }
@@ -151,31 +182,66 @@ const BulkCardEditor: React.FC = () => {
                         loadImage(imageUrl);
                         return;
                     }
+
+                    // Convert data URL to blob, compress, then upload
+                    const response = await fetch(imageUrl);
+                    const blob = await response.blob();
+
+                    // Compress the blob before uploading
+                    const blobFile = new File([blob], 'image.jpg', { type: blob.type });
+                    const compressedFile = await compressImage(blobFile);
+
+                    console.log(`Data URL upload: Original ${(blob.size / (1024 * 1024)).toFixed(2)}MB → Compressed ${(compressedFile.size / (1024 * 1024)).toFixed(2)}MB`);
+
                     const formData = new FormData();
-                    formData.append('file', imageUrl);
+                    formData.append('file', compressedFile);
                     formData.append('upload_preset', uploadPreset);
 
-                    const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
+                    const uploadResponse = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
                         method: 'POST',
                         body: formData
                     });
-                    const data = await response.json();
+                    const uploadData = await uploadResponse.json();
 
-                    if (data.public_id) {
-                        processedImageUrl = cld.image(data.public_id)
+                    console.log(`Cloudinary response:`, uploadData);
+
+                    if (!uploadResponse.ok) {
+                        console.error(`Cloudinary upload failed: ${uploadResponse.status}`, uploadData.error);
+                        throw new Error(uploadData?.error?.message ?? `Upload failed with status ${uploadResponse.status}`);
+                    }
+
+                    if (uploadData.public_id) {
+                        console.log(`✓ Image uploaded with public_id: ${uploadData.public_id}`);
+                        processedImageUrl = cld.image(uploadData.public_id)
                             .effect(backgroundRemoval())
+                            .resize(scale().width(1000))
+                            .delivery(quality(auto()))
+                            .delivery(format(autoFormat()))
                             .toURL();
+                        console.log(`Generated Cloudinary URL: ${processedImageUrl}`);
                     } else {
-                        throw new Error(data?.error?.message ?? 'Invalid Cloudinary response after upload.');
+                        throw new Error(uploadData?.error?.message ?? 'Invalid Cloudinary response after upload.');
                     }
                 } else {
                     // Not a processable URL, just load it
-                    loadImage(imageUrl);
+                    const optimizedUrl = imageUrl.startsWith('http') ?
+                        cld.image(imageUrl).resize(scale().width(1000)).delivery(quality(auto())).delivery(format(autoFormat())).toURL() :
+                        imageUrl;
+                    loadImage(optimizedUrl, imageUrl);
                     return;
                 }
-                loadImage(processedImageUrl, imageUrl); // Try processed, fallback to original
+
+                // For the final call to loadImage, we need both the processed URL and the original as fallback
+                const fallbackUrl = cld.image(imageUrl.split('/').pop()?.split('.')[0] || imageUrl)
+                    .resize(scale().width(1000))
+                    .delivery(quality(auto()))
+                    .delivery(format(autoFormat()))
+                    .toURL();
+
+                loadImage(processedImageUrl, fallbackUrl); // Try processed, fallback to optimized original
                 setPhotoUrl(processedImageUrl);
             } catch (error) {
+                console.error(`Image processing error:`, error);
                 toast.error(`Image processing failed: ${error instanceof Error ? error.message : String(error)}`);
                 loadImage(imageUrl); // Fallback to original on any error
                 setPhotoUrl(imageUrl);
@@ -267,73 +333,212 @@ const BulkCardEditor: React.FC = () => {
 
 
     const handlePhotoSelect = useCallback(async (file: File) => {
-        const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
-        const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
+        try {
+            setIsLoadingImage(true);
+            console.log('🔵 Starting photo upload...');
 
-        if (!cloudName || !uploadPreset) {
-            throw new Error('Missing Cloudinary configuration');
-        }
+            const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
+            const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
 
-        const cld = new Cloudinary({
-            cloud: {
-                cloudName
-            },
-            url: {
-                secure: true
+            if (!cloudName || !uploadPreset) {
+                throw new Error('Missing Cloudinary configuration');
             }
-        });
 
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('upload_preset', uploadPreset);
+            const fileSizeMB = file.size / (1024 * 1024);
+            console.log(`📊 Original file size: ${fileSizeMB.toFixed(2)}MB`);
 
-        const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
-            method: 'POST',
-            body: formData
-        });
+            // Check if compression is needed to stay under Cloudinary's 10MB limit
+            let fileToUpload = file;
+            if (fileSizeMB >= 10) {
+                console.log(`📦 File >= 10MB, compressing locally to stay within Cloudinary's 10MB limit...`);
+                toast.info(`Compressing ${fileSizeMB.toFixed(2)}MB image...`);
+                fileToUpload = await compressImage(file);
+                const compressedSizeMB = fileToUpload.size / (1024 * 1024);
+                console.log(`✓ Local compression complete: ${compressedSizeMB.toFixed(2)}MB`);
+            } else {
+                console.log(`✓ File < 10MB, uploading directly`);
+            }
 
-        const data = await response.json();
+            const cld = new Cloudinary({
+                cloud: { cloudName },
+                url: { secure: true }
+            });
 
-        if (!response.ok) {
-            const message = data?.error?.message ?? 'Failed to upload image to Cloudinary';
-            throw new Error(message);
+            console.log('📤 Uploading to Cloudinary...');
+            const formData = new FormData();
+            formData.append('file', fileToUpload);
+            formData.append('upload_preset', uploadPreset);
+
+            // Transformations are applied server-side via URL generation after upload
+            // Unsigned uploads don't support transformation parameter in FormData
+
+            const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await response.json();
+            console.log('📋 Cloudinary response:', { status: response.status, ok: response.ok, publicId: data.public_id });
+
+            if (!response.ok) {
+                const errorMessage = data?.error?.message ?? `Upload failed with status ${response.status}`;
+                console.error('❌ Cloudinary upload failed:', errorMessage);
+                throw new Error(`Cloudinary upload error: ${errorMessage}`);
+            }
+
+            const publicId = data.public_id;
+            if (!publicId) {
+                throw new Error('Invalid Cloudinary response - no public_id returned');
+            }
+
+            console.log(`✓ Uploaded successfully with public_id: ${publicId}`);
+            console.log('🖼️ Generating optimized URLs with Cloudinary transformations...');
+
+            // Apply Cloudinary transformations for compression and optimization
+            // width: 1000 (resize to 1000px width)
+            // quality: auto (Cloudinary picks best quality setting)
+            // fetch_format: auto (Cloudinary picks best format like WebP)
+            const imageWithBgRemoval = cld.image(publicId)
+                .effect(backgroundRemoval())
+                .resize(scale().width(1000))
+                .delivery(quality(auto()))
+                .delivery(format(autoFormat()));
+            const bgRemovedUrl = imageWithBgRemoval.toURL();
+
+            const originalImage = cld.image(publicId)
+                .resize(scale().width(1000))
+                .delivery(quality(auto()))
+                .delivery(format(autoFormat()));
+            const originalUrl = originalImage.toURL();
+
+            console.log('→ Background removal URL (with compression):', bgRemovedUrl);
+            console.log('→ Original URL (with compression - fallback):', originalUrl);
+
+            // Larger timeout for background removal processing
+            const loadTimeoutMs = 30000;
+            console.log(`→ Using ${loadTimeoutMs}ms timeout for image loading`);
+            let hasTriedFallback = false;
+            let timeoutId: NodeJS.Timeout | null = null;
+
+            await new Promise<void>((resolve, reject) => {
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+
+                const clearCurrentTimeout = () => {
+                    if (timeoutId) {
+                        clearTimeout(timeoutId);
+                        timeoutId = null;
+                    }
+                };
+
+                const startTimeout = (duration: number, retryUrl?: string) => {
+                    clearCurrentTimeout();
+                    timeoutId = setTimeout(() => {
+                        console.warn(`⚠️ Image loading timeout (${duration}ms)`, { currentUrl: img.src, retryUrl });
+                        if (retryUrl && !hasTriedFallback) {
+                            hasTriedFallback = true;
+                            console.log('→ Retrying with fallback URL...');
+                            img.src = retryUrl;
+                            startTimeout(10000);
+                        } else {
+                            clearCurrentTimeout();
+                            reject(new Error('Image loading timed out - unable to load from Cloudinary'));
+                        }
+                    }, duration);
+                };
+
+                img.onload = () => {
+                    clearCurrentTimeout();
+                    console.log('✓ Image loaded successfully');
+                    console.log('📐 Image dimensions:', img.width, 'x', img.height);
+
+                    const newEditorState = {
+                        img,
+                        scale: 1,
+                        rotation: 0,
+                        tx: 0,
+                        ty: 0,
+                        isDragging: false,
+                        dragStart: { x: 0, y: 0 },
+                        lastPos: { x: 0, y: 0 },
+                    };
+
+                    setEditor(newEditorState);
+                    setEmployee(prev => ({ ...prev, photo: fileToUpload }));
+                    setPhotoUrl(img.src);
+                    setIsLoadingImage(false);
+
+                    setTimeout(() => {
+                        console.log('📍 Triggering canvas redraw...');
+                        const canvas = canvasRef.current;
+                        if (canvas) {
+                            canvas.dispatchEvent(new CustomEvent('forceRedraw'));
+                        }
+                    }, 0);
+
+                    const statusMsg = hasTriedFallback
+                        ? `Photo uploaded with original image (background removal unavailable)`
+                        : `Photo uploaded with background removed`;
+                    toast.success(statusMsg);
+                    resolve();
+                };
+
+                img.onerror = (e) => {
+                    console.error(`❌ Image load error:`, {
+                        src: img.src,
+                        attempted: img.src === bgRemovedUrl ? 'background-removal' : 'original',
+                        hasTriedFallback
+                    });
+
+                    if (!hasTriedFallback && img.src === bgRemovedUrl) {
+                        console.warn('⚠️ Background-removed image failed - attempting original URL...');
+                        hasTriedFallback = true;
+                        img.src = originalUrl;
+                        startTimeout(10000);
+                    } else {
+                        clearCurrentTimeout();
+                        reject(new Error('Failed to load image from Cloudinary - both background-removal and original attempts failed'));
+                    }
+                };
+
+                console.log('→ Starting image load from background-removal URL');
+                startTimeout(loadTimeoutMs, originalUrl);
+                img.src = bgRemovedUrl;
+            });
+        } catch (error) {
+            setIsLoadingImage(false);
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            console.error('❌ Photo upload error:', errorMsg);
+            handleShowModal('error', 'Photo Upload Failed', errorMsg);
+            throw error;
         }
-
-        const publicId = data.public_id;
-
-        if (!publicId) {
-            throw new Error('Invalid Cloudinary response');
-        }
-
-        const cloudinaryImage = cld.image(publicId).effect(backgroundRemoval());
-        const imageUrl = cloudinaryImage.toURL();
-        setPhotoUrl(imageUrl);
-
-        await new Promise<void>((resolve, reject) => {
-            const img = new Image();
-            img.crossOrigin = 'anonymous';
-            img.onload = () => {
-                setEditor(prev => ({
-                    ...prev,
-                    img,
-                    scale: 1,
-                    rotation: 0,
-                    tx: 0,
-                    ty: 0,
-                }));
-                setEmployee(prev => ({ ...prev, photo: file }));
-                resolve();
-            };
-            img.onerror = reject;
-            img.src = imageUrl;
-        });
-    }, [setEditor, setEmployee]);
+    }, [setEditor, setEmployee, handleShowModal]);
 
     // drawEditor: paints the editor.img into the visible canvas sized to photoBoxRef
     const drawEditor = useCallback(() => {
         const canvas = canvasRef.current;
         const photoBox = photoBoxRef.current;
-        if (!canvas || !photoBox || !editor.img) return;
+
+        if (!canvas) {
+            console.warn('⚠️ Canvas ref not available');
+            return;
+        }
+        if (!photoBox) {
+            console.warn('⚠️ PhotoBox ref not available');
+            return;
+        }
+        if (!editor.img) {
+            console.warn('⚠️ No image in editor state');
+            return;
+        }
+
+        console.log('🎨 Drawing image to canvas...', {
+            imageSize: `${editor.img.width}x${editor.img.height}`,
+            canvasSize: `${canvas.width}x${canvas.height}`,
+            photoBoxSize: `${photoBox.offsetWidth}x${photoBox.offsetHeight}`,
+            editorScale: editor.scale,
+            editorRotation: editor.rotation,
+        });
 
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
@@ -388,23 +593,28 @@ const BulkCardEditor: React.FC = () => {
 
             // finally draw the offscreen to the visible canvas (scaled to rect)
             ctx.drawImage(offscreen, 0, 0, rect.width, rect.height);
+            console.log('✓ Image drawn to canvas successfully');
         } catch (e) {
-            console.error('drawEditor error', e);
+            console.error('❌ drawEditor error', e);
         }
     }, [editor, TARGET_W_PX, TARGET_H_PX]);
 
     // redraw whenever editor changes
     useEffect(() => {
+        console.log('🎨 Editor state changed, redrawing canvas...', { hasImage: !!editor.img, scale: editor.scale, rotation: editor.rotation });
         drawEditor();
 
         // Listen for force redraw events for download capture
         const canvas = canvasRef.current;
         if (canvas) {
-            const handleForceRedraw = () => drawEditor();
+            const handleForceRedraw = () => {
+                console.log('🔄 Force redraw event triggered');
+                drawEditor();
+            };
             canvas.addEventListener('forceRedraw', handleForceRedraw);
             return () => canvas.removeEventListener('forceRedraw', handleForceRedraw);
         }
-    }, [drawEditor, editor.img]);
+    }, [drawEditor, editor.img, editor.scale, editor.rotation, editor.tx, editor.ty]);
 
     // redraw on window resize to keep canvas sized to layout
     useEffect(() => {
@@ -494,10 +704,15 @@ const BulkCardEditor: React.FC = () => {
         }
 
         setIsSaving(true);
+        setShowSaveProgress(true);
+        setSaveProgress(0);
+
         try {
             const canvas = canvasRef.current;
             let updatedEmployee = { ...employee };
 
+            // Step 1: Process photo
+            setSaveProgress(10);
             if (canvas) {
                 // Ensure the canvas is up to date with latest transforms
                 drawEditor();
@@ -505,9 +720,12 @@ const BulkCardEditor: React.FC = () => {
                 updatedEmployee.photo = photoDataUrl;
             }
 
+            // Step 2: Generate ZIP
+            setSaveProgress(35);
             const blob = await generateZip();
 
-            // Upload ZIP to Supabase Storage
+            // Step 3: Upload ZIP to Supabase Storage
+            setSaveProgress(60);
             const zipFileName = `zips/${employee.fullName.replace(/ /g, '_')}_${employee.employeeId}_ID_Card.zip`;
             const { error: zipError } = await supabase.storage
                 .from('id-card-images')
@@ -528,7 +746,8 @@ const BulkCardEditor: React.FC = () => {
             updatedEmployee.photo_url = safeFotoUrl;
             updatedEmployee.zip_url = finalZipUrl;
 
-            // Update database if cardId exists
+            // Step 4: Update database if cardId exists
+            setSaveProgress(85);
             if (cardId) {
                 const headerMapping: { [key: string]: keyof Employee } = {
                     'full name': 'fullName',
@@ -575,6 +794,10 @@ const BulkCardEditor: React.FC = () => {
                 }
             }
 
+            // Step 5: Finalize
+            setSaveProgress(100);
+            await new Promise(resolve => setTimeout(resolve, 500)); // Show 100% briefly
+
             toast.success('Changes saved! Returning to management...');
             navigate('/import-management', {
                 state: {
@@ -594,6 +817,8 @@ const BulkCardEditor: React.FC = () => {
             toast.error(`Failed to save changes: ${error instanceof Error ? error.message : 'Please try again.'}`);
         } finally {
             setIsSaving(false);
+            setShowSaveProgress(false);
+            setSaveProgress(0);
         }
     };
 
@@ -670,12 +895,13 @@ const BulkCardEditor: React.FC = () => {
 
     return (
         <div className="min-h-screen bg-background">
-            {/* Header */}
-            <AdminHeader setIsSidebarOpen={setSidebarOpen} activeTab="selection" />
-
-            {isSidebarOpen && (
-                <div className="fixed inset-0 bg-gray-800 bg-opacity-50 z-40 lg:hidden" onClick={() => setSidebarOpen(false)}></div>
-            )}
+            <ProgressBar
+                isVisible={showSaveProgress}
+                progress={saveProgress}
+                message="Saving changes..."
+                position="bottom-right"
+            />
+            <AdminHeader />
             <div className={`fixed top-0 left-0 h-full bg-white dark:bg-background-dark w-64 z-50 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-300 ease-in-out lg:hidden`}>
                 <div className="p-5 border-b border-gray-200 dark:border-gray-700">
                     <button onClick={() => setSidebarOpen(false)}>
@@ -709,6 +935,7 @@ const BulkCardEditor: React.FC = () => {
                                         onPointerDown={handlePointerDown}
                                         onPointerMove={handlePointerMove}
                                         onPointerUp={handlePointerUp}
+                                        isLoadingImage={isLoadingImage}
                                     />
                                     <IDCardBack ref={backCardRef} employee={employee} />
                                 </div>
@@ -729,6 +956,7 @@ const BulkCardEditor: React.FC = () => {
                                             onRotateLeft={handleRotateLeft}
                                             onRotateRight={handleRotateRight}
                                             onReset={handleResetPos}
+                                            isLoadingImage={isLoadingImage}
                                         />
                                     </div>
                                     <div className="mt-8 flex flex-col gap-4">

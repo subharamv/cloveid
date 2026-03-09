@@ -19,10 +19,13 @@ import logo from '@/assets/CLOVE LOGO BLACK.png';
 import backLogoSvg from '@/assets/logo svg.png';
 
 import { Cloudinary } from '@cloudinary/url-gen';
-
 import { backgroundRemoval } from '@cloudinary/url-gen/actions/effect';
+import { scale } from "@cloudinary/url-gen/actions/resize";
+import { quality, format } from "@cloudinary/url-gen/actions/delivery";
+import { auto } from "@cloudinary/url-gen/qualifiers/quality";
+import { auto as autoFormat } from "@cloudinary/url-gen/qualifiers/format";
 
-import { imageToDataUrl } from '@/lib/utils';
+import { imageToDataUrl, compressImage } from '@/lib/utils';
 
 import '@/styles/EmployeePage.css';
 const EmployeePage: React.FC = () => {
@@ -145,9 +148,26 @@ const EmployeePage: React.FC = () => {
             }
         });
 
+        // Determine compression strategy based on file size
+        const fileSizeMB = file.size / (1024 * 1024);
+        let fileToUpload = file;
+
+        if (fileSizeMB >= 10) {
+            console.log(`📦 File >= 10MB, compressing locally to stay within Cloudinary's 10MB limit...`);
+            toast.info(`Compressing ${fileSizeMB.toFixed(2)}MB image...`);
+            fileToUpload = await compressImage(file);
+            const compressedSizeMB = fileToUpload.size / (1024 * 1024);
+            console.log(`✓ Local compression complete: ${compressedSizeMB.toFixed(2)}MB`);
+        } else {
+            console.log(`✓ File < 10MB, uploading directly`);
+        }
+
         const formData = new FormData();
-        formData.append('file', file);
+        formData.append('file', fileToUpload);
         formData.append('upload_preset', uploadPreset);
+
+        // Transformations are applied server-side via URL generation after upload
+        // Unsigned uploads don't support transformation parameter in FormData
 
         const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
             method: 'POST',
@@ -167,8 +187,19 @@ const EmployeePage: React.FC = () => {
             throw new Error('Invalid Cloudinary response');
         }
 
-        const cloudinaryImage = cld.image(publicId).effect(backgroundRemoval());
+        // Apply background removal and optimizations to the uploaded image
+        const cloudinaryImage = cld.image(publicId)
+            .effect(backgroundRemoval())
+            .resize(scale().width(1000))
+            .delivery(quality(auto()))
+            .delivery(format(autoFormat()));
         const imageUrl = cloudinaryImage.toURL();
+
+        const originalImage = cld.image(publicId)
+            .resize(scale().width(1000))
+            .delivery(quality(auto()))
+            .delivery(format(autoFormat()));
+        const originalImageUrl = originalImage.toURL();
         setPhotoUrl(imageUrl);
 
         await new Promise<void>((resolve, reject) => {
@@ -183,10 +214,18 @@ const EmployeePage: React.FC = () => {
                     tx: 0,
                     ty: 0,
                 }));
-                setEmployee(prev => ({ ...prev, photo: file }));
+                setEmployee(prev => ({ ...prev, photo: fileToUpload }));
+                setPhotoUrl(img.src);
                 resolve();
             };
-            img.onerror = reject;
+            img.onerror = () => {
+                if (img.src === imageUrl) {
+                    console.warn('⚠️ Background removal failed - trying original...');
+                    img.src = originalImageUrl;
+                } else {
+                    reject(new Error('Failed to load image from Cloudinary'));
+                }
+            };
             img.src = imageUrl;
         });
     }, [setEditor, setEmployee]);

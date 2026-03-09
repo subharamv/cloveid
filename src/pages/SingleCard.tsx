@@ -15,11 +15,16 @@ import cloveLogo from '@/assets/CLOVE LOGO BLACK.png';
 import backLogoSvg from '@/assets/logo svg.png';
 import { Cloudinary } from '@cloudinary/url-gen';
 import { backgroundRemoval } from '@cloudinary/url-gen/actions/effect';
-import { imageToDataUrl } from '@/lib/utils';
+import { scale } from "@cloudinary/url-gen/actions/resize";
+import { quality, format } from "@cloudinary/url-gen/actions/delivery";
+import { auto } from "@cloudinary/url-gen/qualifiers/quality";
+import { auto as autoFormat } from "@cloudinary/url-gen/qualifiers/format";
+import { imageToDataUrl, compressImage } from '@/lib/utils';
 import { supabase } from '@/lib/supabaseClient';
 
 import AdminHeader from '../components/AdminHeader';
 import { useAuth } from '@/hooks/useAuth';
+import { ProgressBar } from '@/components/ProgressBar';
 
 const SingleCard: React.FC = () => {
     const { userRole, logout } = useAuth();
@@ -97,6 +102,10 @@ const SingleCard: React.FC = () => {
 
     const [showUploadNote, setShowUploadNote] = useState(true);
     const [modal, setModal] = useState({ isOpen: false, type: 'error' as 'error' | 'success', title: '', message: '' });
+    const [isLoadingImage, setIsLoadingImage] = useState(false);
+    const [imageProcessProgress, setImageProcessProgress] = useState(0);
+    const [showImageProcessProgress, setShowImageProcessProgress] = useState(false);
+    const [imageProcessMessage, setImageProcessMessage] = useState('');
 
     // editor state holds the HTMLImageElement and transform params
     const [editor, setEditor] = useState({
@@ -147,200 +156,179 @@ const SingleCard: React.FC = () => {
 
 
     const handlePhotoSelect = useCallback(async (file: File) => {
-        const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
-        const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
-
-        if (!cloudName || !uploadPreset) {
-            throw new Error('Missing Cloudinary configuration');
-        }
-
-        const cld = new Cloudinary({
-            cloud: {
-                cloudName
-            },
-            url: {
-                secure: true
-            }
-        });
-
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('upload_preset', uploadPreset);
-
-        const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
-            method: 'POST',
-            body: formData
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            const message = data?.error?.message ?? 'Failed to upload image to Cloudinary';
-            throw new Error(message);
-        }
-
-        const publicId = data.public_id;
-
-        if (!publicId) {
-            throw new Error('Invalid Cloudinary response');
-        }
-
-        const cloudinaryImage = cld.image(publicId).effect(backgroundRemoval());
-        const imageUrl = cloudinaryImage.toURL();
-
-        await new Promise<void>((resolve, reject) => {
-            const img = new Image();
-            img.crossOrigin = 'anonymous';
-            img.onload = () => {
-                setEditor(prev => ({
-                    ...prev,
-                    img,
-                    scale: 1,
-                    rotation: 0,
-                    tx: 0,
-                    ty: 0,
-                }));
-                setEmployee(prev => ({ ...prev, photo: file, photo_url: imageUrl }));
-                resolve();
-            };
-            img.onerror = reject;
-            img.src = imageUrl;
-        });
-    }, [setEditor, setEmployee]);
-
-    const handleSave = async () => {
-        if (!employee.fullName || !employee.employeeId) {
-            toast.error('Please fill in employee name and ID.');
-            return;
-        }
-
         try {
-            toast.info('Saving and generating ZIP...');
+            setIsLoadingImage(true);
+            setShowImageProcessProgress(true);
+            setImageProcessProgress(10);
+            setImageProcessMessage('Checking file size...');
 
-            const frontCard = document.querySelector('.id-card-front') as HTMLElement;
-            const backCard = document.querySelector('.id-card-back') as HTMLElement;
+            const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
+            const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
 
-            let zipUrl = '';
-            let editedPhotoUrl = employee.photo_url; // default to original
-
-            // Generate and save the edited (transformed) photo
-            if (editor.img && editor.img.src) {
-                try {
-                    const offscreen = document.createElement('canvas');
-                    offscreen.width = TARGET_W_PX;
-                    offscreen.height = TARGET_H_PX;
-                    const oc = offscreen.getContext('2d');
-                    if (oc) {
-                        oc.fillStyle = '#fff';
-                        oc.fillRect(0, 0, offscreen.width, offscreen.height);
-                        oc.save();
-                        oc.translate(offscreen.width / 2, offscreen.height / 2);
-                        oc.rotate(editor.rotation);
-                        const coverScale = Math.max(offscreen.width / editor.img.width, offscreen.height / editor.img.height);
-                        const renderScale = coverScale * editor.scale;
-                        oc.scale(renderScale, renderScale);
-                        const dx = -editor.tx - editor.img.width / 2;
-                        const dy = -editor.ty - editor.img.height / 2;
-                        oc.drawImage(editor.img, dx, dy, editor.img.width, editor.img.height);
-                        oc.restore();
-
-                        // Convert canvas to blob and upload
-                        offscreen.toBlob(async (blob) => {
-                            if (blob) {
-                                const photoFileName = `edited-photos/${employee.employeeId}_${Date.now()}.png`;
-                                const { error: photoUploadError } = await supabase.storage
-                                    .from('id-card-images')
-                                    .upload(photoFileName, blob, { upsert: true });
-
-                                if (!photoUploadError) {
-                                    const { data: photoUrlData } = supabase.storage
-                                        .from('id-card-images')
-                                        .getPublicUrl(photoFileName);
-                                    editedPhotoUrl = photoUrlData.publicUrl;
-                                }
-                            }
-                        });
-                    }
-                } catch (photoErr) {
-                    console.error('Error generating edited photo:', photoErr);
-                    // Continue with original photo if edited version fails
-                }
-                // Small delay to allow blob upload to start
-                await new Promise(r => setTimeout(r, 500));
+            if (!cloudName || !uploadPreset) {
+                throw new Error('Missing Cloudinary configuration');
             }
 
-            if (frontCard && backCard) {
-                try {
-                    const zipBlob = await downloadZip(employee, {
-                        img: editor.img,
-                        scale: editor.scale,
-                        rotation: editor.rotation,
-                        tx: editor.tx,
-                        ty: editor.ty,
-                    }, {
-                        w: TARGET_W_PX,
-                        h: TARGET_H_PX,
-                    }, frontCard, backCard, frontLogoDataUrl, backLogoDataUrl);
+            const fileSizeMB = file.size / (1024 * 1024);
+            console.log(`📊 Original file size: ${fileSizeMB.toFixed(2)}MB`);
 
-                    const zipFileName = `zips/${employee.employeeId}_${Date.now()}.zip`;
-                    const { error: uploadError } = await supabase.storage
-                        .from('id-card-images')
-                        .upload(zipFileName, zipBlob, { upsert: true });
-
-                    if (uploadError) throw uploadError;
-
-                    const { data: publicUrlData } = supabase.storage
-                        .from('id-card-images')
-                        .getPublicUrl(zipFileName);
-
-                    zipUrl = publicUrlData.publicUrl;
-                } catch (zipErr) {
-                    console.error('Error generating or uploading ZIP:', zipErr);
-                    // Continue saving even if ZIP fails, but log it
-                }
-            }
-
-            const requestData = {
-                full_name: employee.fullName,
-                employee_id: employee.employeeId,
-                blood_group: employee.bloodGroup,
-                branch: employee.branch,
-                emergency_contact: employee.emergencyContact,
-                country_code: employee.countryCode,
-                photo_url: editedPhotoUrl,
-                zip_url: zipUrl,
-                status: 'Pending',
-                is_edited: true,
-                updated_at: new Date().toISOString(),
-            };
-
-            let error;
-            if (requestId) {
-                // Update existing
-                const { error: updateError } = await supabase
-                    .from('card_details')
-                    .update(requestData)
-                    .eq('id', requestId);
-                error = updateError;
+            // Check if compression is needed to stay under Cloudinary's 10MB limit
+            let fileToUpload = file;
+            if (fileSizeMB >= 10) {
+                console.log(`📦 File >= 10MB, compressing locally to stay within Cloudinary's 10MB limit...`);
+                toast.info(`Compressing ${fileSizeMB.toFixed(2)}MB image...`);
+                fileToUpload = await compressImage(file);
+                const compressedSizeMB = fileToUpload.size / (1024 * 1024);
+                console.log(`✓ Local compression complete: ${compressedSizeMB.toFixed(2)}MB`);
             } else {
-                // Create new
-                const { error: insertError } = await supabase
-                    .from('card_details')
-                    .insert([{ ...requestData, created_at: new Date().toISOString() }]);
-                error = insertError;
+                console.log(`✓ File < 10MB, uploading directly`);
             }
 
-            if (error) throw error;
+            setImageProcessProgress(20);
+            setImageProcessMessage('Uploading to server...');
+            toast.info(`Uploading ${fileSizeMB.toFixed(2)}MB image...`);
 
-            toast.success(requestId ? 'Request updated successfully' : 'Card details saved successfully');
+            setImageProcessProgress(40);
 
-            // Redirect to dashboard after saving
-            setTimeout(() => navigate('/dashboard'), 1500);
+            const cld = new Cloudinary({
+                cloud: { cloudName },
+                url: { secure: true }
+            });
+
+            console.log('📤 Uploading to Cloudinary...');
+            const formData = new FormData();
+            formData.append('file', fileToUpload);
+            formData.append('upload_preset', uploadPreset);
+
+            // Transformations are applied server-side via URL generation after upload
+            // Unsigned uploads don't support transformation parameter in FormData
+
+            const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await response.json();
+            console.log('📋 Cloudinary response:', { status: response.status, ok: response.ok });
+
+            if (!response.ok) {
+                const errorMessage = data?.error?.message ?? `Upload failed with status ${response.status}`;
+                console.error('❌ Cloudinary upload failed:', errorMessage);
+                throw new Error(`Cloudinary upload error: ${errorMessage}`);
+            }
+
+            const publicId = data.public_id;
+            if (!publicId) {
+                throw new Error('Invalid Cloudinary response - no public_id returned');
+            }
+
+            console.log(`✓ Uploaded successfully with public_id: ${publicId}`);
+
+            setImageProcessProgress(70);
+            setImageProcessMessage('Applying Cloudinary server-side transformations...');
+
+            // Apply Cloudinary server-side transformations for compression and optimization
+            // THEN apply background removal to the compressed result
+            // Transformations: width: 1000 (resize), quality: auto, format: auto (picks WebP, etc)
+            const imageWithBgRemoval = cld.image(publicId)
+                .effect(backgroundRemoval())
+                .resize(scale().width(1000))
+                .delivery(quality(auto()))
+                .delivery(format(autoFormat()));
+            const bgRemovedUrl = imageWithBgRemoval.toURL();
+
+            // Fallback: Same transformations but without background removal in case processing fails
+            const originalImage = cld.image(publicId)
+                .resize(scale().width(1000))
+                .delivery(quality(auto()))
+                .delivery(format(autoFormat()));
+            const originalUrl = originalImage.toURL();
+
+            console.log('→ Background removal URL (compressed & optimized):', bgRemovedUrl);
+            console.log('→ Original URL (compressed & optimized - fallback):', originalUrl);
+
+            setImageProcessProgress(90);
+            setImageProcessMessage('Loading processed image...');
+
+            await new Promise<void>((resolve, reject) => {
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                let hasTriedFallback = false;
+                let timeoutId: NodeJS.Timeout | null = null;
+
+                const clearCurrentTimeout = () => {
+                    if (timeoutId) {
+                        clearTimeout(timeoutId);
+                        timeoutId = null;
+                    }
+                };
+
+                const startTimeout = (duration: number, retryUrl?: string) => {
+                    clearCurrentTimeout();
+                    timeoutId = setTimeout(() => {
+                        console.warn(`⚠️ Image loading timeout (${duration}ms)`, { currentUrl: img.src, retryUrl });
+                        if (retryUrl && !hasTriedFallback) {
+                            hasTriedFallback = true;
+                            console.log('→ Retrying with fallback URL...');
+                            img.src = retryUrl;
+                            startTimeout(10000);
+                        } else {
+                            clearCurrentTimeout();
+                            reject(new Error('Image loading timed out - unable to load from Cloudinary'));
+                        }
+                    }, duration);
+                };
+
+                img.onload = () => {
+                    clearCurrentTimeout();
+                    console.log('✓ Image loaded successfully');
+                    console.log('📐 Image dimensions:', img.width, 'x', img.height);
+
+                    setImageProcessProgress(100);
+                    setEditor(prev => ({
+                        ...prev,
+                        img,
+                        scale: 1,
+                        rotation: 0,
+                        tx: 0,
+                        ty: 0,
+                    }));
+                    setEmployee(prev => ({ ...prev, photo: fileToUpload, photo_url: img.src }));
+                    setIsLoadingImage(false);
+                    setTimeout(() => setShowImageProcessProgress(false), 500);
+                    resolve();
+                };
+
+                img.onerror = (e) => {
+                    console.error(`❌ Image load error:`, {
+                        src: img.src,
+                        attempted: img.src === bgRemovedUrl ? 'background-removal' : 'original',
+                        hasTriedFallback
+                    });
+
+                    if (!hasTriedFallback && img.src === bgRemovedUrl) {
+                        console.warn('⚠️ Background-removed image failed - attempting original URL...');
+                        hasTriedFallback = true;
+                        img.src = originalUrl;
+                        startTimeout(10000);
+                    } else {
+                        clearCurrentTimeout();
+                        reject(new Error('Failed to load image from Cloudinary - both background-removal and original attempts failed'));
+                    }
+                };
+
+                console.log('→ Starting image load from background-removal URL');
+                startTimeout(15000, originalUrl);
+                img.src = bgRemovedUrl;
+            });
         } catch (error) {
-            console.error('Error saving card details:', error);
-            toast.error('Failed to save card details');
+            console.error('Photo processing error:', error);
+            const errorMsg = error instanceof Error ? error.message : 'Please try again.';
+            toast.error(`Failed to process image: ${errorMsg}`);
+            setIsLoadingImage(false);
+            setShowImageProcessProgress(false);
         }
-    };
+    }, [setEditor, setEmployee]);
 
     // drawEditor: paints the editor.img into the visible canvas sized to photoBoxRef
     const drawEditor = useCallback(() => {
@@ -687,8 +675,95 @@ const SingleCard: React.FC = () => {
         }
     };
 
+    const handleSave = async () => {
+        if (!employee.fullName || !employee.employeeId) {
+            toast.error('Please fill in at least Full Name and Employee ID');
+            return;
+        }
+
+        try {
+            toast.info('Saving card details...');
+
+            const frontCard = document.querySelector('.id-card-front-container') as HTMLElement;
+            const backCard = document.querySelector('.id-card-back-container') as HTMLElement;
+
+            if (!frontCard || !backCard) {
+                throw new Error('Card elements not found');
+            }
+
+            // Generate ZIP file
+            const zipBlob = await downloadZip(
+                employee,
+                {
+                    img: editor.img,
+                    scale: editor.scale,
+                    rotation: editor.rotation,
+                    tx: editor.tx,
+                    ty: editor.ty,
+                },
+                { w: TARGET_W_PX, h: TARGET_H_PX },
+                frontCard,
+                backCard,
+                frontLogoDataUrl,
+                backLogoDataUrl
+            );
+
+            // Upload ZIP to Supabase Storage
+            const zipFileName = `zips/${employee.fullName.replace(/ /g, '_')}_ID_Card.zip`;
+            const { error: zipError } = await supabase.storage
+                .from('id-card-images')
+                .upload(zipFileName, zipBlob, { upsert: true });
+
+            if (zipError) {
+                throw zipError;
+            }
+
+            const { data: publicUrlData } = supabase.storage
+                .from('id-card-images')
+                .getPublicUrl(zipFileName);
+
+            const zipUrl = publicUrlData.publicUrl;
+
+            // Save to database
+            const cardData = {
+                full_name: employee.fullName,
+                employee_id: employee.employeeId,
+                blood_group: employee.bloodGroup,
+                branch: employee.branch,
+                emergency_contact: employee.emergencyContact,
+                country_code: employee.countryCode,
+                photo_url: employee.photo_url || null,
+                zip_url: zipUrl,
+                created_at: new Date().toISOString(),
+                status: 'pending'
+            };
+
+            const { error: dbError } = await supabase
+                .from('card_details')
+                .insert(cardData);
+
+            if (dbError) {
+                console.error('Error saving to database:', dbError);
+                toast.error('Failed to save card details.');
+            } else {
+                toast.success('Card details saved successfully!');
+                // Reset form after successful save
+                handleReset();
+            }
+        } catch (error) {
+            console.error('Error in handleSave:', error);
+            toast.error(error instanceof Error ? error.message : 'An error occurred while saving');
+        }
+    };
+
     return (
         <div className="min-h-screen bg-background">
+            <ProgressBar
+                isVisible={showImageProcessProgress}
+                progress={imageProcessProgress}
+                message={imageProcessMessage}
+                position="bottom-right"
+            />
             {/* Header */}
             <AdminHeader setIsSidebarOpen={setSidebarOpen} activeTab="selection" />
 
@@ -726,6 +801,7 @@ const SingleCard: React.FC = () => {
                             showUploadNote={showUploadNote}
                             onHideUploadNote={handleHideUploadNote}
                             onShowModal={handleShowModal}
+                            isLoadingImage={isLoadingImage}
                         />
                     </div>
 
@@ -855,6 +931,7 @@ const SingleCard: React.FC = () => {
                                 onPointerDown={handlePointerDown}
                                 onPointerMove={handlePointerMove}
                                 onPointerUp={handlePointerUp}
+                                isLoadingImage={isLoadingImage}
                             />
                         </div>
 

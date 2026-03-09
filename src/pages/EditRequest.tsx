@@ -14,7 +14,11 @@ import cloveLogo from '@/assets/CLOVE LOGO BLACK.png';
 import backLogoSvg from '@/assets/logo svg.png';
 import { Cloudinary } from '@cloudinary/url-gen';
 import { backgroundRemoval } from '@cloudinary/url-gen/actions/effect';
-import { imageToDataUrl } from '@/lib/utils';
+import { scale } from "@cloudinary/url-gen/actions/resize";
+import { quality, format } from "@cloudinary/url-gen/actions/delivery";
+import { auto } from "@cloudinary/url-gen/qualifiers/quality";
+import { auto as autoFormat } from "@cloudinary/url-gen/qualifiers/format";
+import { imageToDataUrl, compressImage } from '@/lib/utils';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabaseClient';
 import AdminHeader from '../components/AdminHeader';
@@ -42,6 +46,7 @@ const EditRequest: React.FC = () => {
 
     const [showUploadNote, setShowUploadNote] = useState(true);
     const [modal, setModal] = useState({ isOpen: false, type: 'error' as 'error' | 'success', title: '', message: '' });
+    const [isLoadingImage, setIsLoadingImage] = useState(false);
 
     // editor state holds the HTMLImageElement and transform params
     const [editor, setEditor] = useState({
@@ -133,6 +138,7 @@ const EditRequest: React.FC = () => {
                     tx: 0,
                     ty: 0,
                 }));
+                setPhotoUrl(img.src);
             };
             img.src = url;
         } catch (error) {
@@ -166,66 +172,116 @@ const EditRequest: React.FC = () => {
 
 
     const handlePhotoSelect = useCallback(async (file: File) => {
-        const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
-        const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
+        try {
+            setIsLoadingImage(true);
+            const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
+            const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
 
-        if (!cloudName || !uploadPreset) {
-            throw new Error('Missing Cloudinary configuration');
-        }
-
-        const cld = new Cloudinary({
-            cloud: {
-                cloudName
-            },
-            url: {
-                secure: true
+            if (!cloudName || !uploadPreset) {
+                throw new Error('Missing Cloudinary configuration');
             }
-        });
 
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('upload_preset', uploadPreset);
+            const cld = new Cloudinary({
+                cloud: { cloudName },
+                url: { secure: true }
+            });
 
-        const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
-            method: 'POST',
-            body: formData
-        });
+            // Determine compression strategy based on file size
+            const fileSizeMB = file.size / (1024 * 1024);
+            let transformationString = '';
+            let fileToUpload = file;
 
-        const data = await response.json();
+            if (fileSizeMB > 10) {
+                console.log(`📦 File > 10MB, compressing locally...`);
+                toast.info(`Compressing ${fileSizeMB.toFixed(2)}MB image...`);
+                fileToUpload = await compressImage(file);
+                const compressedSizeMB = fileToUpload.size / (1024 * 1024);
+                console.log(`✓ Local compression complete: ${compressedSizeMB.toFixed(2)}MB`);
 
-        if (!response.ok) {
-            const message = data?.error?.message ?? 'Failed to upload image to Cloudinary';
-            throw new Error(message);
+                // Still apply Cloudinary transformation for extra safety on delivery
+                transformationString = 'w_1200,c_scale,q_auto,f_auto';
+            } else if (fileSizeMB > 8) {
+                transformationString = 'w_1500,c_scale,q_auto,f_auto';
+            } else if (fileSizeMB > 6) {
+                transformationString = 'w_1800,c_scale,q_auto,f_auto';
+            } else if (fileSizeMB > 4) {
+                transformationString = 'w_2000,c_scale,q_auto,f_auto';
+            }
+
+            const formData = new FormData();
+            formData.append('file', fileToUpload);
+            formData.append('upload_preset', uploadPreset);
+
+            // Add transformation parameter for server-side compression
+            if (transformationString) {
+                formData.append('transformation', transformationString);
+            }
+
+            const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                const message = data?.error?.message ?? 'Failed to upload image to Cloudinary';
+                throw new Error(message);
+            }
+
+            const publicId = data.public_id;
+
+            if (!publicId) {
+                throw new Error('Invalid Cloudinary response');
+            }
+
+            // Apply background removal and optimizations to the uploaded image
+            const cloudinaryImage = cld.image(publicId)
+                .effect(backgroundRemoval())
+                .resize(scale().width(1000))
+                .delivery(quality(auto()))
+                .delivery(format(autoFormat()));
+            const imageUrl = cloudinaryImage.toURL();
+
+            const originalImage = cld.image(publicId)
+                .resize(scale().width(1000))
+                .delivery(quality(auto()))
+                .delivery(format(autoFormat()));
+            const originalImageUrl = originalImage.toURL();
+            setPhotoUrl(imageUrl);
+
+            await new Promise<void>((resolve, reject) => {
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                img.onload = () => {
+                    setEditor(prev => ({
+                        ...prev,
+                        img,
+                        scale: 1,
+                        rotation: 0,
+                        tx: 0,
+                        ty: 0,
+                    }));
+                    setEmployee(prev => ({ ...prev, photo: fileToUpload }));
+                    setPhotoUrl(img.src);
+                    setIsLoadingImage(false);
+                    resolve();
+                };
+                img.onerror = () => {
+                    if (img.src === imageUrl) {
+                        console.warn('⚠️ Background removal failed - trying original...');
+                        img.src = originalImageUrl;
+                    } else {
+                        setIsLoadingImage(false);
+                        reject(new Error('Failed to load image from Cloudinary'));
+                    }
+                };
+                img.src = imageUrl;
+            });
+        } catch (error) {
+            setIsLoadingImage(false);
+            throw error;
         }
-
-        const publicId = data.public_id;
-
-        if (!publicId) {
-            throw new Error('Invalid Cloudinary response');
-        }
-
-        const cloudinaryImage = cld.image(publicId).effect(backgroundRemoval());
-        const imageUrl = cloudinaryImage.toURL();
-        setPhotoUrl(imageUrl);
-
-        await new Promise<void>((resolve, reject) => {
-            const img = new Image();
-            img.crossOrigin = 'anonymous';
-            img.onload = () => {
-                setEditor(prev => ({
-                    ...prev,
-                    img,
-                    scale: 1,
-                    rotation: 0,
-                    tx: 0,
-                    ty: 0,
-                }));
-                setEmployee(prev => ({ ...prev, photo: file }));
-                resolve();
-            };
-            img.onerror = reject;
-            img.src = imageUrl;
-        });
     }, [setEditor, setEmployee]);
 
     // drawEditor: paints the editor.img into the visible canvas sized to photoBoxRef
@@ -394,9 +450,35 @@ const EditRequest: React.FC = () => {
             throw new Error('Missing Cloudinary configuration');
         }
 
+        // Determine compression strategy based on file size
+        const fileSizeMB = file.size / (1024 * 1024);
+        let transformationString = '';
+
+        if (fileSizeMB > 10) {
+            // Very aggressive compression for files > 10MB - target 7MB
+            transformationString = 'w_1200,c_scale,q_auto,f_auto,e_background_removal';
+        } else if (fileSizeMB > 8) {
+            // Moderate compression for files 8-10MB - target 8MB
+            transformationString = 'w_1500,c_scale,q_auto,f_auto,e_background_removal';
+        } else if (fileSizeMB > 6) {
+            // Light compression for files 6-8MB - target 9MB
+            transformationString = 'w_1800,c_scale,q_auto,f_auto,e_background_removal';
+        } else if (fileSizeMB > 4) {
+            // Minimal compression for files 4-6MB
+            transformationString = 'w_2000,c_scale,q_auto,f_auto,e_background_removal';
+        } else {
+            // Files under 4MB get background removal only
+            transformationString = 'e_background_removal';
+        }
+
         const formData = new FormData();
         formData.append('file', file);
         formData.append('upload_preset', uploadPreset);
+
+        // Add transformation parameter for server-side compression
+        if (transformationString) {
+            formData.append('transformation', transformationString);
+        }
 
         const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
             method: 'POST',
@@ -409,10 +491,9 @@ const EditRequest: React.FC = () => {
         }
 
         const data = await response.json();
-        // Background removal is not allowed in unsigned upload params, 
-        // but we can try to apply it as a transformation in the URL if the account supports it
+        // Background removal is now applied during upload via transformation
         if (data.secure_url) {
-            return data.secure_url.replace('/upload/', '/upload/e_background_removal/');
+            return data.secure_url;
         }
         return data.secure_url;
     };
@@ -734,6 +815,7 @@ const EditRequest: React.FC = () => {
                             showUploadNote={showUploadNote}
                             onHideUploadNote={handleHideUploadNote}
                             onShowModal={handleShowModal}
+                            isLoadingImage={isLoadingImage}
                         />
                     </div>
 
@@ -781,6 +863,7 @@ const EditRequest: React.FC = () => {
                                 onPointerDown={handlePointerDown}
                                 onPointerMove={handlePointerMove}
                                 onPointerUp={handlePointerUp}
+                                isLoadingImage={isLoadingImage}
                             />
                         </div>
 
