@@ -1222,6 +1222,8 @@ const ManageRequests = () => {
                     onApprove={handleApprove}
                     onReject={handleReject}
                     onEdit={(id) => navigate(`/edit-request/${id}`)}
+                    frontLogoSrc={frontLogoDataUrl}
+                    backLogoSrc={backLogoDataUrl}
                 />
             )}
             {isVendorModalOpen && (
@@ -1260,6 +1262,8 @@ const ManageRequests = () => {
             <HiddenCardRenderer
                 id={processingRequest ? `id-card-${processingRequest.id}` : undefined}
                 employee={processingRequest ? requestToEmployee(processingRequest) : null}
+                frontLogoSrc={frontLogoDataUrl}
+                backLogoSrc={backLogoDataUrl}
             />
         </div>
     );

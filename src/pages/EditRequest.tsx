@@ -857,7 +857,7 @@ const EditRequest: React.FC = () => {
                         <div className="id-card-front-container w-[230px] h-[365px] bg-white shadow-sm rounded-lg overflow-hidden">
                             <IDCardFront
                                 employee={employee}
-                                logo={cloveLogo}
+                                logoSrc={frontLogoDataUrl}
                                 canvasRef={canvasRef}
                                 photoBoxRef={photoBoxRef}
                                 onPointerDown={handlePointerDown}
@@ -871,7 +871,7 @@ const EditRequest: React.FC = () => {
                             <strong className="text-primary">PREVIEW — BACK</strong>
                         </div>
                         <div className="id-card-back-container w-[230px] h-[365px] bg-white shadow-sm rounded-lg overflow-hidden">
-                            <IDCardBack employee={employee} />
+                            <IDCardBack employee={employee} logoSrc={backLogoDataUrl} />
                         </div>
                     </div>
                 </div>

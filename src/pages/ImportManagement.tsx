@@ -1536,6 +1536,8 @@ const ImportManagement = () => {
                         photo: processingRequest.photo,
                         countryCode: '+91'
                     }}
+                    frontLogoSrc={frontLogoDataUrl}
+                    backLogoSrc={backLogoDataUrl}
                 />
             )}
             {viewingRequest && (

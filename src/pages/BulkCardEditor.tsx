@@ -929,7 +929,7 @@ const BulkCardEditor: React.FC = () => {
                                     <IDCardFront
                                         ref={frontCardRef}
                                         employee={employee}
-                                        logo={cloveLogo}
+                                        logoSrc={frontLogoDataUrl}
                                         photoBoxRef={photoBoxRef}
                                         canvasRef={canvasRef}
                                         onPointerDown={handlePointerDown}
@@ -937,7 +937,7 @@ const BulkCardEditor: React.FC = () => {
                                         onPointerUp={handlePointerUp}
                                         isLoadingImage={isLoadingImage}
                                     />
-                                    <IDCardBack ref={backCardRef} employee={employee} />
+                                    <IDCardBack ref={backCardRef} employee={employee} logoSrc={backLogoDataUrl} />
                                 </div>
                             </div>
                             <div>

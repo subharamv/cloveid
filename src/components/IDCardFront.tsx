@@ -11,6 +11,7 @@ interface IDCardFrontProps {
     onPointerMove?: (e: React.PointerEvent) => void;
     onPointerUp?: (e: React.PointerEvent) => void;
     isLoadingImage?: boolean;
+    logoSrc?: string;
 }
 
 export const IDCardFront = React.forwardRef<HTMLDivElement, IDCardFrontProps>(({
@@ -20,10 +21,11 @@ export const IDCardFront = React.forwardRef<HTMLDivElement, IDCardFrontProps>(({
     onPointerDown,
     onPointerMove,
     onPointerUp,
-    isLoadingImage
+    isLoadingImage,
+    logoSrc: propLogoSrc
 }, ref) => {
     const { branding } = useBranding();
-    const logoSrc = branding.logo_id_front || cloveLogoDefault;
+    const logoSrc = propLogoSrc || branding.logo_id_front || cloveLogoDefault;
 
     return (
         <div ref={ref} className="id-card-front card-container relative w-[230px] h-[365px] bg-white">

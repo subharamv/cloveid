@@ -34,6 +34,7 @@ const EmployeePage: React.FC = () => {
     const { logout, clearSession } = useAuth();
     const [isSidebarOpen, setSidebarOpen] = useState(false);
 
+    const [frontLogoDataUrl, setFrontLogoDataUrl] = useState<string>('');
     const [backLogoDataUrl, setBackLogoDataUrl] = useState<string>('');
     const [isCardFlipped, setCardFlipped] = useState(false);
 
@@ -79,6 +80,8 @@ const EmployeePage: React.FC = () => {
     useEffect(() => {
         const loadLogos = async () => {
             try {
+                const frontLogoUrl = await imageToDataUrl(logo);
+                setFrontLogoDataUrl(frontLogoUrl);
                 const backLogoUrl = await imageToDataUrl(backLogoSvg);
                 setBackLogoDataUrl(backLogoUrl);
             } catch (error) {
@@ -414,7 +417,7 @@ const EmployeePage: React.FC = () => {
             }, {
                 w: TARGET_W_PX,
                 h: TARGET_H_PX,
-            }, frontCard, backCard, backLogoDataUrl);
+            }, frontCard, backCard, frontLogoDataUrl, backLogoDataUrl);
 
             // Create download link
             const url = URL.createObjectURL(zipBlob);
@@ -441,7 +444,19 @@ const EmployeePage: React.FC = () => {
                 html2canvas(cardElement, {
                     scale: 10, // Use a high scale for maximum quality
                     backgroundColor: '#FFFFFF',
+                    useCORS: true,
+                    allowTaint: true,
+                    imageTimeout: 15000,
                     onclone: (clonedDoc) => {
+                        // Ensure logos use data URLs in the cloned document
+                        const logoDataUrl = isFront ? frontLogoDataUrl : backLogoDataUrl;
+                        if (logoDataUrl) {
+                            const logoImgs = clonedDoc.querySelectorAll('img[alt*="Clove"]');
+                            logoImgs.forEach((logoImg) => {
+                                (logoImg as HTMLImageElement).src = logoDataUrl;
+                            });
+                        }
+
                         if (!isFront) return;
 
                         const canvasEl = clonedDoc.querySelector('canvas');
@@ -477,7 +492,7 @@ const EmployeePage: React.FC = () => {
                 }).then(resolve).catch(reject);
             });
         });
-    }, [editor.img, editor.rotation, editor.scale, editor.tx, editor.ty, TARGET_W_PX, TARGET_H_PX]);
+    }, [editor.img, editor.rotation, editor.scale, editor.tx, editor.ty, TARGET_W_PX, TARGET_H_PX, frontLogoDataUrl, backLogoDataUrl]);
 
     const handleReset = useCallback(() => {
         setEmployee({
@@ -693,12 +708,12 @@ const EmployeePage: React.FC = () => {
                                             >
                                                 <div className="absolute w-full h-full backface-hidden">
                                                     <div className="w-full h-full mx-auto bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900 rounded-2xl p-6 shadow-lg flex items-center justify-center">
-                                                        <IDCardFront employee={employee} canvasRef={canvasRef} photoBoxRef={photoBoxRef} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} />
+                                                        <IDCardFront employee={employee} logoSrc={frontLogoDataUrl} canvasRef={canvasRef} photoBoxRef={photoBoxRef} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} />
                                                     </div>
                                                 </div>
                                                 <div className="absolute w-full h-full backface-hidden rotate-y-180">
                                                     <div className="w-full h-full mx-auto bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900 rounded-2xl p-6 shadow-lg flex items-center justify-center">
-                                                        <IDCardBack employee={employee} backLogoDataUrl={backLogoDataUrl} />
+                                                        <IDCardBack employee={employee} logoSrc={backLogoDataUrl} />
                                                     </div>
                                                 </div>
                                             </div>

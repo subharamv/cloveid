@@ -25,9 +25,11 @@ interface ViewRequestModalProps {
     onReject: (id: number) => void;
     onEdit?: (id: number) => void; // Make onEdit optional
     isVendorView?: boolean; // Add prop to indicate vendor view
+    frontLogoSrc?: string;
+    backLogoSrc?: string;
 }
 
-const ViewRequestModal: React.FC<ViewRequestModalProps> = ({ request, onClose, onApprove, onReject, onEdit, isVendorView = false }) => {
+const ViewRequestModal: React.FC<ViewRequestModalProps> = ({ request, onClose, onApprove, onReject, onEdit, isVendorView = false, frontLogoSrc, backLogoSrc }) => {
     const [isCardFlipped, setCardFlipped] = useState(false);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const photoBoxRef = useRef<HTMLDivElement | null>(null);
@@ -80,12 +82,13 @@ const ViewRequestModal: React.FC<ViewRequestModalProps> = ({ request, onClose, o
                                 <div className="w-full h-full mx-auto bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900 rounded-2xl p-6 shadow-lg flex items-center justify-center">
                                     <IDCardFront
                                         employee={employee}
+                                        logoSrc={frontLogoSrc}
                                     />
                                 </div>
                             </div>
                             <div className="absolute w-full h-full backface-hidden rotate-y-180">
                                 <div className="w-full h-full mx-auto bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900 rounded-2xl p-6 shadow-lg flex items-center justify-center">
-                                    <IDCardBack employee={employee} />
+                                    <IDCardBack employee={employee} logoSrc={backLogoSrc} />
                                 </div>
                             </div>
                         </div>

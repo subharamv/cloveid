@@ -6,15 +6,17 @@ import { IDCardBack } from './IDCardBack';
 interface HiddenCardRendererProps {
     employee: any;
     id?: string;
+    frontLogoSrc?: string;
+    backLogoSrc?: string;
 }
 
-export const HiddenCardRenderer = forwardRef<HTMLDivElement, HiddenCardRendererProps>(({ employee, id }, ref) => {
+export const HiddenCardRenderer = forwardRef<HTMLDivElement, HiddenCardRendererProps>(({ employee, id, frontLogoSrc, backLogoSrc }, ref) => {
     if (!employee) return null;
 
     return (
         <div ref={ref} id={id} style={{ position: 'absolute', left: '-9999px', top: '-9999px' }}>
-            <IDCardFront employee={employee} />
-            <IDCardBack employee={employee} />
+            <IDCardFront employee={employee} logoSrc={frontLogoSrc} />
+            <IDCardBack employee={employee} logoSrc={backLogoSrc} />
         </div>
     );
 });

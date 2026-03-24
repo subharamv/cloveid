@@ -6,9 +6,10 @@ import logoDefault from '@/assets/logo svg.png';
 
 interface IDCardBackProps {
   employee: Employee;
+  logoSrc?: string;
 }
 
-export const IDCardBack = React.forwardRef<HTMLDivElement, IDCardBackProps>(({ employee }, ref) => {
+export const IDCardBack = React.forwardRef<HTMLDivElement, IDCardBackProps>(({ employee, logoSrc: propLogoSrc }, ref) => {
   const { branding } = useBranding();
   const { branches } = useBranches();
   
@@ -18,7 +19,7 @@ export const IDCardBack = React.forwardRef<HTMLDivElement, IDCardBackProps>(({ e
     ? `${employee.countryCode} ${employee.emergencyContact}`
     : employee.emergencyContact || '—';
 
-  const logoSrc = branding.logo_id_back || logoDefault;
+  const logoSrc = propLogoSrc || branding.logo_id_back || logoDefault;
 
   return (
     <div ref={ref} className="id-card-back card-container relative w-[230px] h-[365px]">

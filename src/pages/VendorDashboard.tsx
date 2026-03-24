@@ -490,6 +490,8 @@ const VendorDashboard = () => {
                     onApprove={() => handleAccept(viewingRequest.id)}
                     onReject={() => handleReject(viewingRequest.id)}
                     isVendorView={true}
+                    frontLogoSrc={frontLogoDataUrl}
+                    backLogoSrc={backLogoDataUrl}
                 />
             )}
 
@@ -505,6 +507,8 @@ const VendorDashboard = () => {
                         photo: processingRequest.photo,
                         countryCode: '+91'
                     }}
+                    frontLogoSrc={frontLogoDataUrl}
+                    backLogoSrc={backLogoDataUrl}
                 />
             )}
         </div>

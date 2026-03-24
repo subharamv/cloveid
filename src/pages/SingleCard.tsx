@@ -541,7 +541,19 @@ const SingleCard: React.FC = () => {
                 html2canvas(cardElement, {
                     scale: 10, // Use a high scale for maximum quality
                     backgroundColor: '#FFFFFF',
+                    useCORS: true,
+                    allowTaint: true,
+                    imageTimeout: 15000,
                     onclone: (clonedDoc) => {
+                        // Ensure logos use data URLs in the cloned document
+                        const logoDataUrl = isFront ? frontLogoDataUrl : backLogoDataUrl;
+                        if (logoDataUrl) {
+                            const logoImgs = clonedDoc.querySelectorAll('img[alt*="Clove"]');
+                            logoImgs.forEach((logoImg) => {
+                                (logoImg as HTMLImageElement).src = logoDataUrl;
+                            });
+                        }
+
                         if (!isFront) return;
 
                         const canvasEl = clonedDoc.querySelector('canvas');
@@ -577,7 +589,7 @@ const SingleCard: React.FC = () => {
                 }).then(resolve).catch(reject);
             });
         });
-    }, [editor.img, editor.rotation, editor.scale, editor.tx, editor.ty, TARGET_W_PX, TARGET_H_PX]);
+    }, [editor.img, editor.rotation, editor.scale, editor.tx, editor.ty, TARGET_W_PX, TARGET_H_PX, frontLogoDataUrl, backLogoDataUrl]);
 
     const handleReset = useCallback(() => {
         setEmployee({
@@ -925,7 +937,7 @@ const SingleCard: React.FC = () => {
                         <div className="id-card-front-container w-[230px] h-[365px] bg-white shadow-sm rounded-lg overflow-hidden">
                             <IDCardFront
                                 employee={employee}
-                                logo={cloveLogo}
+                                logoSrc={frontLogoDataUrl}
                                 canvasRef={canvasRef}
                                 photoBoxRef={photoBoxRef}
                                 onPointerDown={handlePointerDown}
@@ -939,7 +951,7 @@ const SingleCard: React.FC = () => {
                             <strong className="text-primary">PREVIEW — BACK</strong>
                         </div>
                         <div className="id-card-back-container w-[230px] h-[365px] bg-white shadow-sm rounded-lg overflow-hidden">
-                            <IDCardBack employee={employee} />
+                            <IDCardBack employee={employee} logoSrc={backLogoDataUrl} />
                         </div>
                     </div>
                 </div>
