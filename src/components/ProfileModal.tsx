@@ -18,6 +18,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
     const [formData, setFormData] = useState({
         full_name: '',
         employee_id: '',
+        designation: '',
         branch: '',
         department: '',
         blood_group: '',
@@ -71,6 +72,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
                     setFormData({
                         full_name: data.full_name || '',
                         employee_id: empId,
+                        designation: data.designation || '',
                         branch: data.branch || '',
                         department: data.department || '',
                         blood_group: data.blood_group || '',
@@ -115,6 +117,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
                 .update({
                     full_name: formData.full_name,
                     employee_id: formData.employee_id || null,
+                    designation: formData.designation || null,
                     branch: formData.branch || null,
                     department: formData.department || null,
                     blood_group: formData.blood_group || null,
@@ -194,6 +197,21 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
                                 placeholder="XXXX"
                             />
                         </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                            <Briefcase className="h-4 w-4" />
+                            Designation
+                        </label>
+                        <input
+                            type="text"
+                            name="designation"
+                            value={formData.designation}
+                            onChange={handleChange}
+                            className="w-full px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
+                            placeholder="e.g. Software Engineer, Manager, etc."
+                        />
                     </div>
 
                     <div className="space-y-2">

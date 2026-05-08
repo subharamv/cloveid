@@ -33,6 +33,8 @@ const VendorDashboard = () => {
     const [page, setPage] = useState(1);
     const [perPage, setPerPage] = useState(10);
     const PAGE_SIZES = [10, 20, 50];
+    const [selectedRequests, setSelectedRequests] = useState<string[]>([]);
+    const [selectAll, setSelectAll] = useState(false);
 
     useEffect(() => {
         const loadLogos = async () => {
@@ -231,6 +233,103 @@ const VendorDashboard = () => {
             toast.error('Failed to download ID card');
         } finally {
             setProcessingRequest(null);
+        }
+    };
+
+    const toggleSelectAll = () => {
+        if (selectAll) {
+            setSelectedRequests([]);
+            setSelectAll(false);
+        } else {
+            setSelectedRequests(paginatedRequests.map((r: any) => r.vendor_request_id));
+            setSelectAll(true);
+        }
+    };
+
+    const toggleSelectRequest = (vendorRequestId: string) => {
+        if (selectedRequests.includes(vendorRequestId)) {
+            setSelectedRequests(selectedRequests.filter(id => id !== vendorRequestId));
+            setSelectAll(false);
+        } else {
+            setSelectedRequests([...selectedRequests, vendorRequestId]);
+        }
+    };
+
+    const handleBatchAccept = async () => {
+        if (selectedRequests.length === 0) {
+            toast.error('Please select at least one request');
+            return;
+        }
+        try {
+            for (const vrId of selectedRequests) {
+                await supabase
+                    .from('vendor_requests')
+                    .update({ status: 'accepted' })
+                    .eq('id', vrId);
+            }
+            toast.success(`${selectedRequests.length} requests accepted!`);
+            setSelectedRequests([]);
+            setSelectAll(false);
+            fetchVendorRequests();
+        } catch (error) {
+            console.error('Error batch accepting:', error);
+            toast.error('Failed to accept requests');
+        }
+    };
+
+    const handleBatchReject = async () => {
+        if (selectedRequests.length === 0) {
+            toast.error('Please select at least one request');
+            return;
+        }
+        try {
+            for (const vrId of selectedRequests) {
+                await supabase
+                    .from('vendor_requests')
+                    .update({ status: 'rejected' })
+                    .eq('id', vrId);
+            }
+            toast.success(`${selectedRequests.length} requests rejected!`);
+            setSelectedRequests([]);
+            setSelectAll(false);
+            fetchVendorRequests();
+        } catch (error) {
+            console.error('Error batch rejecting:', error);
+            toast.error('Failed to reject requests');
+        }
+    };
+
+    const handleBatchDownload = async () => {
+        if (selectedRequests.length === 0) {
+            toast.error('Please select at least one request');
+            return;
+        }
+        
+        const selectedItems = requests.filter((r: any) => selectedRequests.includes(r.vendor_request_id) && r.zip_url);
+        if (selectedItems.length === 0) {
+            toast.error('No downloadable files for selected requests');
+            return;
+        }
+
+        try {
+            toast.info(`Downloading ${selectedItems.length} files...`);
+            for (const item of selectedItems) {
+                try {
+                    const link = document.createElement('a');
+                    link.href = item.zip_url;
+                    link.download = `${item.name?.replace(/ /g, '_') || 'ID_Card'}.zip`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                } catch (err) {
+                    console.error('Error downloading:', item.name, err);
+                }
+            }
+            toast.success(`Downloaded ${selectedItems.length} files!`);
+        } catch (error) {
+            console.error('Error batch downloading:', error);
+            toast.error('Failed to download files');
         }
     };
 
@@ -458,13 +557,59 @@ const VendorDashboard = () => {
                                 </div>
                             ) : (
                                 <>
+                                    {/* Batch Action Bar */}
+                                    {paginatedRequests.length > 0 && (
+                                        <div className="mb-3 flex flex-wrap items-center gap-2">
+                                            <div className="flex items-center gap-2 mr-2">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selectAll}
+                                                    onChange={toggleSelectAll}
+                                                    className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                                />
+                                                <span className="text-sm text-muted-foreground">Select All</span>
+                                            </div>
+                                            {selectedRequests.length > 0 && (
+                                                <>
+                                                    <span className="text-sm text-muted-foreground">({selectedRequests.length} selected)</span>
+                                                    <button
+                                                        onClick={handleBatchAccept}
+                                                        className="px-3 py-1.5 bg-green-500 hover:bg-green-600 text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-1"
+                                                    >
+                                                        <Check size={14} /> Accept
+                                                    </button>
+                                                    <button
+                                                        onClick={handleBatchReject}
+                                                        className="px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-1"
+                                                    >
+                                                        <XCircle size={14} /> Reject
+                                                    </button>
+                                                    <button
+                                                        onClick={handleBatchDownload}
+                                                        className="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-1"
+                                                    >
+                                                        <Download size={14} /> Download
+                                                    </button>
+                                                </>
+                                            )}
+                                        </div>
+                                    )}
+
                                     {/* Desktop Table */}
                                     <div className="hidden md:block bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden">
                                         <div className="overflow-x-auto">
                                             <table className="w-full">
                                                 <thead>
                                                     <tr className="bg-gray-50 dark:bg-gray-900/50 border-b border-gray-100 dark:border-gray-800">
-                                                        <th className="py-3.5 px-5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">ID</th>
+                                                        <th className="py-3.5 px-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider w-10">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={selectAll}
+                                                                onChange={toggleSelectAll}
+                                                                className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                                            />
+                                                        </th>
+                                                        <th className="py-3.5 px-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">ID</th>
                                                         <th className="py-3.5 px-5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Name</th>
                                                         <th className="py-3.5 px-5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Employee ID</th>
                                                         <th className="py-3.5 px-5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Branch</th>
@@ -476,7 +621,15 @@ const VendorDashboard = () => {
                                                 <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                                                     {paginatedRequests.map((request) => (
                                                         <tr key={request.id} className="hover:bg-gray-50 dark:hover:bg-gray-900/30 transition-colors">
-                                                            <td className="py-4 px-5 text-sm font-mono text-muted-foreground">{request.id}</td>
+                                                            <td className="py-4 px-3">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={selectedRequests.includes(request.vendor_request_id)}
+                                                                    onChange={() => toggleSelectRequest(request.vendor_request_id)}
+                                                                    className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                                                />
+                                                            </td>
+                                                            <td className="py-4 px-3 text-sm font-mono text-muted-foreground">{request.id}</td>
                                                             <td className="py-4 px-5 text-sm font-medium text-foreground">{request.name}</td>
                                                             <td className="py-4 px-5 text-sm text-muted-foreground">{request.employeeId}</td>
                                                             <td className="py-4 px-5 text-sm text-muted-foreground">{request.branch}</td>
@@ -585,6 +738,15 @@ const VendorDashboard = () => {
                                     <div className="md:hidden space-y-3">
                                         {paginatedRequests.map((request) => (
                                             <div key={request.id} className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm p-4 space-y-3">
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={selectedRequests.includes(request.vendor_request_id)}
+                                                        onChange={() => toggleSelectRequest(request.vendor_request_id)}
+                                                        className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                                    />
+                                                    <span className="text-xs text-muted-foreground">#{request.id}</span>
+                                                </div>
                                                 <div className="flex items-start justify-between">
                                                     <div className="space-y-0.5">
                                                         <p className="text-sm font-medium text-foreground">{request.name}</p>

@@ -4,13 +4,13 @@ import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/hooks/useAuth';
 import AppHeader from '../components/AppHeader';
 import { toast } from 'sonner';
-import { Loader2, Upload, Trash2, Image as ImageIcon, MapPin, Phone, Mail, Globe, Save, Building2, Plus, Pencil, Layout, Layers, FileDigit, Info, Palette } from 'lucide-react';
+import { Loader2, Upload, Trash2, Image as ImageIcon, MapPin, Phone, Mail, Globe, Save, Building2, Plus, Pencil, Layout, Layers, FileDigit, Info, Palette, HardDrive } from 'lucide-react';
 import { useBranding } from '@/hooks/useBranding';
 import { useBranches, Branch } from '@/hooks/useBranches';
 import { useDepartments, Department } from '@/hooks/useDepartments';
 import { useNavigate } from 'react-router-dom';
 
-type Tab = 'branding' | 'branches' | 'departments' | 'contact' | 'cardEditor';
+type Tab = 'branding' | 'branches' | 'departments' | 'contact' | 'cardEditor' | 'storage';
 
 const BrandingSettings = () => {
     const { userRole } = useAuth();
@@ -154,13 +154,19 @@ const BrandingSettings = () => {
         );
     }
 
-    const tabs = [
+    const allTabs = [
         { id: 'branding' as Tab, label: 'Branding', icon: Layout },
         { id: 'branches' as Tab, label: 'Branches', icon: Building2 },
         { id: 'departments' as Tab, label: 'Departments', icon: Layers },
         { id: 'contact' as Tab, label: 'Contact Info', icon: Info },
         { id: 'cardEditor' as Tab, label: 'Card Editor', icon: Palette },
     ];
+
+    if (userRole === 'admin') {
+        allTabs.push({ id: 'storage' as Tab, label: 'Storage', icon: HardDrive });
+    }
+
+    const tabs = allTabs;
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-950 dark:to-gray-900">
@@ -183,6 +189,8 @@ const BrandingSettings = () => {
                                 onClick={() => {
                                     if (tab.id === 'cardEditor') {
                                         navigate('/settings/card-editor');
+                                    } else if (tab.id === 'storage') {
+                                        navigate('/settings/storage');
                                     } else {
                                         setActiveTab(tab.id);
                                     }

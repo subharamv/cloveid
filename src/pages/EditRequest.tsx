@@ -193,10 +193,9 @@ const EditRequest: React.FC = () => {
                 url: { secure: true }
             });
 
-            // Determine compression strategy based on file size
-            const fileSizeMB = file.size / (1024 * 1024);
-            let transformationString = '';
+            // Compress locally if file is over 10MB to stay under Cloudinary limit
             let fileToUpload = file;
+            const fileSizeMB = file.size / (1024 * 1024);
 
             if (fileSizeMB > 10) {
                 console.log(`📦 File > 10MB, compressing locally...`);
@@ -204,25 +203,11 @@ const EditRequest: React.FC = () => {
                 fileToUpload = await compressImage(file);
                 const compressedSizeMB = fileToUpload.size / (1024 * 1024);
                 console.log(`✓ Local compression complete: ${compressedSizeMB.toFixed(2)}MB`);
-
-                // Still apply Cloudinary transformation for extra safety on delivery
-                transformationString = 'w_1200,c_scale,q_auto,f_auto';
-            } else if (fileSizeMB > 8) {
-                transformationString = 'w_1500,c_scale,q_auto,f_auto';
-            } else if (fileSizeMB > 6) {
-                transformationString = 'w_1800,c_scale,q_auto,f_auto';
-            } else if (fileSizeMB > 4) {
-                transformationString = 'w_2000,c_scale,q_auto,f_auto';
             }
 
             const formData = new FormData();
             formData.append('file', fileToUpload);
             formData.append('upload_preset', uploadPreset);
-
-            // Add transformation parameter for server-side compression
-            if (transformationString) {
-                formData.append('transformation', transformationString);
-            }
 
             const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
                 method: 'POST',
@@ -474,52 +459,39 @@ const EditRequest: React.FC = () => {
             throw new Error('Missing Cloudinary configuration');
         }
 
-        // Determine compression strategy based on file size
-        const fileSizeMB = file.size / (1024 * 1024);
-        let transformationString = '';
-
-        if (fileSizeMB > 10) {
-            // Very aggressive compression for files > 10MB - target 7MB
-            transformationString = 'w_1200,c_scale,q_auto,f_auto,e_background_removal';
-        } else if (fileSizeMB > 8) {
-            // Moderate compression for files 8-10MB - target 8MB
-            transformationString = 'w_1500,c_scale,q_auto,f_auto,e_background_removal';
-        } else if (fileSizeMB > 6) {
-            // Light compression for files 6-8MB - target 9MB
-            transformationString = 'w_1800,c_scale,q_auto,f_auto,e_background_removal';
-        } else if (fileSizeMB > 4) {
-            // Minimal compression for files 4-6MB
-            transformationString = 'w_2000,c_scale,q_auto,f_auto,e_background_removal';
-        } else {
-            // Files under 4MB get background removal only
-            transformationString = 'e_background_removal';
-        }
-
         const formData = new FormData();
         formData.append('file', file);
         formData.append('upload_preset', uploadPreset);
-
-        // Add transformation parameter for server-side compression
-        if (transformationString) {
-            formData.append('transformation', transformationString);
-        }
 
         const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
             method: 'POST',
             body: formData
         });
 
+        // Parse body once to avoid consuming the stream twice
+        const data = await response.json();
+
         if (!response.ok) {
-            const data = await response.json();
             throw new Error(data?.error?.message ?? 'Failed to upload image');
         }
 
-        const data = await response.json();
-        // Background removal is now applied during upload via transformation
-        if (data.secure_url) {
-            return data.secure_url;
+        if (!data.public_id) {
+            throw new Error('Invalid Cloudinary response - no public_id returned');
         }
-        return data.secure_url;
+
+        const cld = new Cloudinary({
+            cloud: { cloudName },
+            url: { secure: true }
+        });
+
+        const transformedUrl = cld.image(data.public_id)
+            .effect(backgroundRemoval())
+            .resize(scale().width(1000))
+            .delivery(quality(auto()))
+            .delivery(format(autoFormat()))
+            .toURL();
+
+        return transformedUrl;
     };
 
     const generateProcessedImage = async (): Promise<Blob> => {

@@ -25,6 +25,7 @@ import IssuedCards from './pages/IssuedCards';
 import VendorDashboard from './pages/VendorDashboard';
 import BatchManagement from './pages/BatchManagement';
 import BrandingSettings from './pages/BrandingSettings';
+import StorageManagement from './pages/StorageManagement';
 import CardCanvasEditor from './pages/CardCanvasEditor';
 import ResetPassword from './pages/ResetPassword';
 import { ProtectedRoute } from './components/ProtectedRoute';
@@ -61,6 +62,7 @@ const App = () => (
               <Route path="/issued-cards" element={<IssuedCards />} />
               <Route path="/settings/branding" element={<BrandingSettings />} />
               <Route path="/settings/card-editor" element={<CardCanvasEditor />} />
+              <Route path="/settings/storage" element={<StorageManagement />} />
             </Route>
 
             {/* User Protected Routes */}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import {
     CreditCard, ClipboardList, Settings, ChevronRight,     Clock, CheckCircle2,
     Hourglass, ShieldCheck, Truck, Printer, Store, XCircle, AlertCircle,
@@ -18,12 +18,14 @@ const STEPS = [
     { key: 'sent_for_print', label: 'Sent for Print', icon: Truck, color: 'blue', desc: 'Cards sent to vendor' },
     { key: 'printed', label: 'Printed', icon: Printer, color: 'purple', desc: 'Card is ready' },
     { key: 'ready_to_collect', label: 'Ready to Collect', icon: Store, color: 'green', desc: 'Collect from office' },
+    { key: 'completed', label: 'Collected', icon: CheckCircle2, color: 'green', desc: 'Card collected' },
 ] as const;
 
 const STATUS_ORDER: Record<string, number> = {
     'Submitted': 0, 'Pending': 1, 'In Review': 1, 'Approved': 2,
     'Sent for Print': 3, 'Printed': 4,
-    'Ready to Collect': 5, 'Ready for Pickup': 5,
+    'Ready to Collect': 5, 'Ready for Pickup': 5, 
+    'Completed': 6, 'Collected': 6,
 };
 
 function getStepIndex(status: string): number {
@@ -58,10 +60,12 @@ function getGreeting(): { text: string; icon: typeof Sun } {
 
 const UserDashboardPage = () => {
     const navigate = useNavigate();
+    const location = useLocation();
     const { user, profile, userRole, logout, clearSession, loading: authLoading } = useAuth();
     const [requests, setRequests] = useState<Request[]>([]);
     const [selectedRequest, setSelectedRequest] = useState<Request | null>(null);
     const [loading, setLoading] = useState(true);
+    const [collecting, setCollecting] = useState(false);
 
     useEffect(() => {
         const getRequests = async () => {
@@ -81,6 +85,10 @@ const UserDashboardPage = () => {
                             let displayStatus = req.status;
                             if (req.print_status === 'ready_to_collect') {
                                 displayStatus = 'Ready to Collect';
+                            } else if (req.print_status === 'collected') {
+                                displayStatus = 'Completed';
+                            } else if (req.status === 'Completed') {
+                                displayStatus = 'Completed';
                             }
                             return {
                                 id: req.id,
@@ -92,9 +100,7 @@ const UserDashboardPage = () => {
                             };
                         });
                         setRequests(formattedRequests);
-                        if (formattedRequests.length > 0) {
-                            setSelectedRequest(formattedRequests[0]);
-                        }
+                        setSelectedRequest(formattedRequests[0] || null);
                     }
                 } catch (error) {
                     console.error('Unexpected error:', error);
@@ -104,17 +110,20 @@ const UserDashboardPage = () => {
             }
         };
         getRequests();
-    }, [user, authLoading, userRole]);
+    }, [user, authLoading, userRole, location.pathname]);
 
     const statusRequest = selectedRequest || (requests.length > 0 ? requests[0] : null);
     const currentStepIndex = statusRequest ? getStepIndex(statusRequest.status) : -1;
     const requestCounts = {
         total: requests.length,
-        active: requests.filter(r => !['Ready to Collect', 'Ready for Pickup', 'Rejected'].includes(r.status)).length,
-        completed: requests.filter(r => ['Ready to Collect', 'Ready for Pickup'].includes(r.status)).length,
+        active: requests.filter(r => !['Ready to Collect', 'Ready for Pickup', 'Completed', 'Collected', 'Printed'].includes(r.status)).length,
+        readyToCollect: requests.filter(r => ['Ready to Collect', 'Ready for Pickup'].includes(r.status)).length,
+        collected: requests.filter(r => ['Completed', 'Collected'].includes(r.status)).length,
     };
 
     const statusColors: Record<string, string> = {
+        'Completed': 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800',
+        'Collected': 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800',
         'Ready to Collect': 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800',
         'Ready for Pickup': 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800',
         'Printed': 'bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-900/20 dark:text-violet-400 dark:border-violet-800',
@@ -124,6 +133,42 @@ const UserDashboardPage = () => {
         'Pending': 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800',
         'Submitted': 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800',
         'Rejected': 'bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800',
+    };
+
+    const handleCollectCard = async () => {
+        if (!statusRequest || !user) return;
+        
+        const confirmCollect = window.confirm('Confirm that you have collected your ID card?');
+        if (!confirmCollect) return;
+
+        setCollecting(true);
+        try {
+            const { error } = await supabase
+                .from('requests')
+                .update({ 
+                    print_status: 'collected',
+                    status: 'Completed',
+                    collected_at: new Date().toISOString(),
+                    collected_by: user.id
+                })
+                .eq('id', statusRequest.id);
+
+            if (error) throw error;
+
+            setRequests(prev => prev.map(req => 
+                req.id === statusRequest.id 
+                    ? { ...req, status: 'Completed', print_status: 'collected' }
+                    : req
+            ));
+            setSelectedRequest(prev => prev ? { ...prev, status: 'Completed', print_status: 'collected' } : null);
+            
+            alert('Card collected successfully!');
+        } catch (error) {
+            console.error('Error collecting card:', error);
+            alert('Failed to update collection status. Please try again.');
+        } finally {
+            setCollecting(false);
+        }
     };
 
     return (
@@ -190,7 +235,7 @@ const UserDashboardPage = () => {
                     </div>
 
                     {/* Quick Stats */}
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-8">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
                         <div className="bg-white dark:bg-gray-800/80 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
                             <p className="text-2xl font-bold text-gray-900 dark:text-white">{requestCounts.total}</p>
                             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Total Requests</p>
@@ -199,9 +244,13 @@ const UserDashboardPage = () => {
                             <p className="text-2xl font-bold text-amber-600">{requestCounts.active}</p>
                             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">In Progress</p>
                         </div>
-                        <div className="bg-white dark:bg-gray-800/80 rounded-xl border border-gray-200 dark:border-gray-700 p-4 col-span-2 sm:col-span-1">
-                            <p className="text-2xl font-bold text-emerald-600">{requestCounts.completed}</p>
+                        <div className="bg-white dark:bg-gray-800/80 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+                            <p className="text-2xl font-bold text-emerald-600">{requestCounts.readyToCollect}</p>
                             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Ready to Collect</p>
+                        </div>
+                        <div className="bg-white dark:bg-gray-800/80 rounded-xl border border-gray-200 dark:border-gray-700 p-4 col-span-2 sm:col-span-1">
+                            <p className="text-2xl font-bold text-green-700 dark:text-green-400">{requestCounts.collected}</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Collected</p>
                         </div>
                     </div>
 
@@ -233,12 +282,22 @@ const UserDashboardPage = () => {
                                     {statusRequest ? (
                                         <span className={`inline-flex items-center gap-1.5 mt-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border ${statusColors[statusRequest.status] || 'bg-gray-50 text-gray-600 border-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600'}`}>
                                             {statusRequest.status === 'Rejected' ? <XCircle size={12} /> :
-                                                statusRequest.status === 'Ready to Collect' || statusRequest.status === 'Ready for Pickup' ? <CheckCircle2 size={12} /> :
+                                                statusRequest.status === 'Ready to Collect' || statusRequest.status === 'Ready for Pickup' || statusRequest.status === 'Completed' || statusRequest.status === 'Collected' ? <CheckCircle2 size={12} /> :
                                                     <Clock size={12} />}
                                             {statusRequest.status}
                                         </span>
                                     ) : (
                                         <p className="text-sm text-gray-400 mt-1">No requests</p>
+                                    )}
+                                    {statusRequest && (statusRequest.status === 'Ready to Collect' || statusRequest.status === 'Ready for Pickup') && (
+                                        <button
+                                            onClick={handleCollectCard}
+                                            disabled={collecting}
+                                            className="mt-2 w-full flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-semibold bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition-colors disabled:opacity-50"
+                                        >
+                                            <CheckCircle2 size={16} />
+                                            {collecting ? 'Confirming...' : 'I Have Collected My Card'}
+                                        </button>
                                     )}
                                 </div>
                             </div>
@@ -291,33 +350,40 @@ const UserDashboardPage = () => {
                             ) : (
                                 <>
                                     {/* Horizontal desktop steps */}
-                                    <div className="hidden sm:flex items-start justify-between px-2">
+                                    <div className="hidden sm:flex items-center justify-between px-2">
                                         {STEPS.map((step, i) => {
                                             const StepIcon = step.icon;
                                             const isActive = i <= currentStepIndex;
                                             const isCurrent = i === currentStepIndex;
                                             const isLast = i === STEPS.length - 1;
+                                            const isCompleted = ['Ready to Collect', 'Ready for Pickup', 'Completed', 'Collected'].includes(statusRequest.status);
                                             return (
-                                                <div key={step.key} className="flex items-center gap-0 flex-1">
-                                                    <div className="flex flex-col items-center">
-                                                        <div className={`relative flex items-center justify-center w-9 h-9 rounded-full transition-all duration-300 ${
-                                                            isActive
-                                                                ? 'bg-gradient-to-br from-orange-400 to-orange-600 text-white shadow-md shadow-orange-200 dark:shadow-orange-900/30'
-                                                                : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500'
-                                                        } ${isCurrent ? 'ring-4 ring-orange-100 dark:ring-orange-900/40 scale-110' : ''}`}>
-                                                            <StepIcon size={16} />
+                                                <div key={step.key} className="flex-1 flex flex-col items-center">
+                                                    <div className="flex items-center w-full">
+                                                        <div className="flex flex-col items-center">
+                                                            <div className={`relative flex items-center justify-center w-9 h-9 rounded-full transition-all duration-300 ${
+                                                                isActive
+                                                                    ? isCompleted
+                                                                        ? 'bg-gradient-to-br from-green-500 to-green-600 text-white shadow-md shadow-green-200 dark:shadow-green-900/30'
+                                                                        : 'bg-gradient-to-br from-orange-400 to-orange-600 text-white shadow-md shadow-orange-200 dark:shadow-orange-900/30'
+                                                                    : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500'
+                                                            } ${isCurrent ? 'ring-4 ring-green-100 dark:ring-green-900/40 scale-110' : ''}`}>
+                                                                <StepIcon size={16} />
+                                                            </div>
                                                         </div>
-                                                        <p className={`mt-2 text-xs font-medium whitespace-nowrap ${
-                                                            isActive ? 'text-gray-900 dark:text-white' : 'text-gray-400 dark:text-gray-500'
-                                                        }`}>
-                                                            {step.label}
-                                                        </p>
+                                                        {!isLast && (
+                                                            <div className={`h-0.5 flex-1 mx-1 ${
+                                                                i < currentStepIndex
+                                                                    ? (isCompleted ? 'bg-green-500' : 'bg-orange-400')
+                                                                    : 'bg-gray-200 dark:bg-gray-700'
+                                                            }`} />
+                                                        )}
                                                     </div>
-                                                    {!isLast && (
-                                                        <div className={`flex-1 h-0.5 mx-3 mt-[-1.5rem] rounded-full ${
-                                                            i < currentStepIndex ? 'bg-orange-400' : 'bg-gray-200 dark:bg-gray-700'
-                                                        }`} />
-                                                    )}
+                                                    <p className={`mt-2 text-xs font-medium whitespace-nowrap ${
+                                                        isActive ? (isCompleted ? 'text-green-600 dark:text-green-400' : 'text-gray-900 dark:text-white') : 'text-gray-400 dark:text-gray-500'
+                                                    }`}>
+                                                        {step.label}
+                                                    </p>
                                                 </div>
                                             );
                                         })}
@@ -330,25 +396,32 @@ const UserDashboardPage = () => {
                                             const isActive = i <= currentStepIndex;
                                             const isCurrent = i === currentStepIndex;
                                             const isLast = i === STEPS.length - 1;
+                                            const isCompleted = ['Ready to Collect', 'Ready for Pickup', 'Completed', 'Collected'].includes(statusRequest.status);
                                             return (
                                                 <div key={step.key} className="flex gap-3">
                                                     <div className="flex flex-col items-center">
                                                         <div className={`flex items-center justify-center w-8 h-8 rounded-full transition-all ${
                                                             isActive
-                                                                ? 'bg-gradient-to-br from-orange-400 to-orange-600 text-white'
+                                                                ? isCompleted
+                                                                    ? 'bg-gradient-to-br from-green-500 to-green-600 text-white'
+                                                                    : 'bg-gradient-to-br from-orange-400 to-orange-600 text-white'
                                                                 : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500'
-                                                        } ${isCurrent ? 'ring-4 ring-orange-100 dark:ring-orange-900/40' : ''}`}>
+                                                        } ${isCurrent ? 'ring-4 ring-green-100 dark:ring-green-900/40' : ''}`}>
                                                             <StepIcon size={14} />
                                                         </div>
                                                         {!isLast && (
                                                             <div className={`w-0.5 flex-1 min-h-[1.5rem] my-1 ${
-                                                                i < currentStepIndex ? 'bg-orange-400' : 'bg-gray-200 dark:bg-gray-700'
+                                                                i < currentStepIndex 
+                                                                    ? (isCompleted ? 'bg-green-500' : 'bg-orange-400') 
+                                                                    : 'bg-gray-200 dark:bg-gray-700'
                                                             }`} />
                                                         )}
                                                     </div>
                                                     <div className={`pb-6 ${isLast ? 'pb-0' : ''}`}>
                                                         <p className={`text-sm font-medium ${
-                                                            isActive ? 'text-gray-900 dark:text-white' : 'text-gray-400 dark:text-gray-500'
+                                                            isActive 
+                                                                ? (isCompleted ? 'text-green-600 dark:text-green-400' : 'text-gray-900 dark:text-white') 
+                                                                : 'text-gray-400 dark:text-gray-500'
                                                         }`}>
                                                             {step.label}
                                                         </p>

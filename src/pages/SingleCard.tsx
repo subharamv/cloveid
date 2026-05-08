@@ -62,7 +62,7 @@ const SingleCard: React.FC = () => {
                 .from('card_details')
                 .select('*')
                 .eq('id', id)
-                .single();
+                .maybeSingle();
 
             if (error) throw error;
 
