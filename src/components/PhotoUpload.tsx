@@ -23,7 +23,7 @@ interface PhotoUploadProps {
     isLoadingImage?: boolean;
 }
 
-const MAX_FILE_SIZE = 104857600; // 100 MB in bytes (increased to allow Cloudinary processing of large files)
+const MAX_FILE_SIZE = 104857600;
 const MAX_FILE_SIZE_MB = (MAX_FILE_SIZE / (1024 * 1024)).toFixed(2);
 
 export const PhotoUpload: React.FC<PhotoUploadProps> = ({
@@ -65,16 +65,10 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
         try {
             const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2);
 
-            // Pass original file directly to BulkCardEditor/SingleCard for compression decision
-            // based on whether file size >= 10MB
-            console.log(`📦 File size: ${fileSizeMB}MB - passing to parent handler for processing`);
-
             await onPhotoSelect(file);
             onHideUploadNote();
             onShowModal?.('success', 'File accepted', `File (${fileSizeMB}MB) accepted and ready for processing.`);
         } catch (err) {
-            // Parent component (BulkCardEditor, SingleCard, etc.) handles detailed error messages
-            // Only show a generic fallback if no modal was shown by the parent
             const errorMsg = err instanceof Error ? err.message : String(err);
             if (!errorMsg.includes('Upload') && !errorMsg.includes('Cloudinary')) {
                 onShowModal?.('error', 'Load error', 'Could not process the selected image.');
@@ -111,6 +105,7 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
         if (file) {
             handleFile(file);
         }
+        e.target.value = '';
     };
 
     const handlePaste = (e: ClipboardEvent) => {
@@ -133,35 +128,68 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
         return () => document.removeEventListener('paste', handlePaste);
     }, []);
 
+    const busy = isProcessing || isLoadingImage;
+
     return (
         <div className="space-y-3">
-            <label className="block text-muted-foreground text-sm mb-2">
-                Photo (upload)
-            </label>
-
-            <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/png,image/jpeg"
-                onChange={handleFileInput}
-                disabled={isProcessing || isLoadingImage}
-                className="w-full p-2.5 border border-input-border rounded-lg bg-white text-foreground text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-            />
-
-            {(isProcessing || isLoadingImage) && (
-                <div className="flex items-center gap-2 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                    <div className="animate-spin">
-                        <svg className="w-4 h-4 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                    </div>
-                    <span className="text-sm text-blue-700 dark:text-blue-300">Processing image...</span>
-                </div>
+            {!editor?.img && (
+                <label className="block text-muted-foreground text-sm">
+                    Photo (upload)
+                </label>
             )}
 
-            {showUploadNote && !isProcessing && !isLoadingImage && (
-                <div className={`upload-note ${!showUploadNote ? 'fade-out' : ''}`}>
+            <div
+                onDrop={handleDrop}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onClick={() => !busy && fileInputRef.current?.click()}
+                className={`relative flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-5 transition-all cursor-pointer select-none ${
+                    isDragging
+                        ? 'border-primary bg-primary/5 scale-[1.01]'
+                        : 'border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500'
+                } ${busy ? 'pointer-events-none opacity-60' : ''}`}
+            >
+                <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg"
+                    onChange={handleFileInput}
+                    disabled={busy}
+                    className="hidden"
+                />
+
+                {busy ? (
+                    <div className="flex items-center gap-2.5 py-1">
+                        <div className="animate-spin">
+                            <svg className="w-5 h-5 text-primary" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                            </svg>
+                        </div>
+                        <span className="text-sm text-muted-foreground">Processing image...</span>
+                    </div>
+                ) : isDragging ? (
+                    <div className="text-center py-2">
+                        <span className="material-symbols-outlined text-3xl text-primary">cloud_upload</span>
+                        <p className="text-sm font-medium text-primary mt-1">Drop photo here</p>
+                    </div>
+                ) : editor?.img ? (
+                    <div className="flex items-center gap-2 py-1">
+                        <span className="material-symbols-outlined text-xl text-green-500">check_circle</span>
+                        <span className="text-sm text-muted-foreground">Photo uploaded</span>
+                        <span className="text-xs text-primary font-medium ml-auto">Change</span>
+                    </div>
+                ) : (
+                    <div className="text-center py-2">
+                        <span className="material-symbols-outlined text-3xl text-gray-400">cloud_upload</span>
+                        <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mt-1">Drag & drop photo here, or click to browse</p>
+                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">JPEG / PNG · Max {MAX_FILE_SIZE_MB} MB</p>
+                    </div>
+                )}
+            </div>
+
+            {showUploadNote && !busy && !editor?.img && (
+                <div className="text-xs text-muted-foreground">
                     Supported: JPEG / PNG. Max file size: {MAX_FILE_SIZE_MB} MB. Drag & drop or paste supported.
                 </div>
             )}

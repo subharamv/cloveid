@@ -1,9 +1,10 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { useLocation, useNavigate, Link } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Employee, PhotoTransform } from '@/types/employee';
 import { EmployeeForm } from '@/components/EmployeeForm';
 import { PhotoUpload } from '@/components/PhotoUpload';
+import { ImageAdjustments } from '@/components/ImageAdjustments';
 import { IDCardFront } from '@/components/IDCardFront';
 import { IDCardBack } from '@/components/IDCardBack';
 import { Modal } from '@/components/Modal';
@@ -20,19 +21,16 @@ import { quality, format } from "@cloudinary/url-gen/actions/delivery";
 import { auto } from "@cloudinary/url-gen/qualifiers/quality";
 import { auto as autoFormat } from "@cloudinary/url-gen/qualifiers/format";
 import { imageToDataUrl, compressImage } from '@/lib/utils';
-import AdminHeader from '../components/AdminHeader';
-import { useAuth } from '@/hooks/useAuth';
+import AppHeader from '../components/AppHeader';
 import { supabase } from '@/lib/supabaseClient';
 import { ProgressBar } from '@/components/ProgressBar';
 
 const BulkCardEditor: React.FC = () => {
     const location = useLocation();
     const navigate = useNavigate();
-    const { logout } = useAuth();
     const { rowData, headers, rowIndex, csvData, zipUrls, cardId, batchId, cardIds, cardPrintStatuses = {} } = location.state || { rowData: [], headers: [], rowIndex: -1, csvData: [], zipUrls: {}, cardId: null, batchId: null, cardIds: {}, cardPrintStatuses: {} };
 
     const { downloadZip } = useDownloadZip();
-    const [isSidebarOpen, setSidebarOpen] = useState(false);
     const [zipBlob, setZipBlob] = useState<Blob | null>(null);
     const [photoUrl, setPhotoUrl] = useState<string | null>(null);
     const [isSaving, setIsSaving] = useState(false);
@@ -60,83 +58,100 @@ const BulkCardEditor: React.FC = () => {
             const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
             const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
 
-            const loadImage = (url: string, fallbackUrl?: string) => {
+            const extractPublicId = (url: string): string | null => {
+                try {
+                    const pathname = new URL(url).pathname;
+                    const parts = pathname.split('/');
+                    const uploadIndex = parts.indexOf('upload');
+                    if (uploadIndex === -1) return null;
+                    return parts[parts.length - 1] || null;
+                } catch {
+                    return null;
+                }
+            };
+
+            const loadImage = (urls: string[], onSuccess?: (successUrl: string) => void) => {
+                let index = 0;
                 const img = new Image();
                 img.crossOrigin = 'anonymous';
-                img.onload = () => {
-                    console.log(`✓ Image loaded successfully from: ${img.src}`);
-                    setEditor(prev => ({ ...prev, img, scale: 1, rotation: 0, tx: 0, ty: 0 }));
-                    setPhotoUrl(img.src);
-                    setShowUploadNote(false);
-                };
-                img.onerror = () => {
-                    console.error(`✗ Failed to load image from: ${url}`);
-                    if (fallbackUrl && url !== fallbackUrl) {
-                        console.log(`↻ Attempting fallback image: ${fallbackUrl}`);
-                        toast.error('Failed to load processed image. Loading original.');
-                        img.src = fallbackUrl;
-                    } else {
-                        toast.error(`Failed to load image from URL: ${url}`);
+
+                const tryNext = () => {
+                    if (index >= urls.length) {
+                        toast.error('Failed to load image from any URL.');
+                        return;
                     }
+                    const currentUrl = urls[index];
+                    img.onload = () => {
+                        console.log(`✓ Image loaded from: ${currentUrl}`);
+                        setEditor(prev => ({ ...prev, img, scale: 1, rotation: 0, tx: 0, ty: 0 }));
+                        setPhotoUrl(currentUrl);
+                        setShowUploadNote(false);
+                        onSuccess?.(currentUrl);
+                    };
+                    img.onerror = () => {
+                        console.error(`✗ Failed to load image from: ${currentUrl}`);
+                        index++;
+                        if (index < urls.length) {
+                            console.log(`↻ Trying fallback URL: ${urls[index]}`);
+                            if (index === 1) {
+                                toast.error('Background removal failed, loading original.');
+                            }
+                            tryNext();
+                        } else {
+                            toast.error(`Failed to load image from URL: ${currentUrl}`);
+                        }
+                    };
+                    console.log(`→ Loading image from: ${currentUrl}`);
+                    img.src = currentUrl;
                 };
-                console.log(`→ Loading image from: ${url}`);
-                img.src = url;
+                tryNext();
             };
 
             if (!cloudName) {
                 toast.error('Cloudinary configuration is missing. Cannot process image.');
-                loadImage(imageUrl);
+                loadImage([imageUrl]);
                 return;
             }
 
             const cld = new Cloudinary({ cloud: { cloudName }, url: { secure: true } });
             let processedImageUrl: string;
+            let cloudinaryPublicId: string | null = null;
 
             try {
                 if (imageUrl.startsWith('http')) {
-                    // Check if the image has the broken fetch delivery pattern (causes 401 errors)
                     const hasFetchDelivery = imageUrl.includes('image/fetch/');
-
                     let urlToProcess = imageUrl;
 
                     if (hasFetchDelivery) {
-                        // Extract the original URL from the fetch delivery URL
-                        // Pattern: https://res.cloudinary.com/.../image/fetch/.../{original_url}?...
                         const fetchMatch = imageUrl.match(/image\/fetch\/(?:.*?\/)?(https:\/\/[^\s?]+)/);
                         if (fetchMatch && fetchMatch[1]) {
                             urlToProcess = fetchMatch[1];
                         } else {
-                            // If we can't extract, throw error to use original fallback
                             throw new Error('Fetch delivery URLs are not supported. Reprocessing image.');
                         }
                     }
 
-                    // Check if the image already has background removal applied (non-fetch method)
                     const hasBackgroundRemoval = imageUrl.includes('e_background_removal') || imageUrl.includes('e_bgremoval');
 
                     if (hasBackgroundRemoval && !hasFetchDelivery) {
-                        // Image is already processed with a proper method, load it directly
+                        cloudinaryPublicId = extractPublicId(imageUrl);
                         processedImageUrl = imageUrl;
                     } else {
-                        // For HTTP URLs, download and upload to Cloudinary for processing
                         if (!uploadPreset) {
                             throw new Error('Cloudinary upload preset is missing. Cannot process image.');
                         }
 
-                        // Download the image as a blob
                         const response = await fetch(urlToProcess);
                         if (!response.ok) {
                             throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
                         }
                         const blob = await response.blob();
 
-                        // Compress the blob before uploading
                         const blobFile = new File([blob], 'image.jpg', { type: blob.type });
                         const compressedFile = await compressImage(blobFile);
 
                         console.log(`Processing image: Original ${(blob.size / (1024 * 1024)).toFixed(2)}MB → Compressed ${(compressedFile.size / (1024 * 1024)).toFixed(2)}MB`);
 
-                        // Convert compressed file to data URL
                         const reader = new FileReader();
                         const dataUrlPromise = new Promise<string>((resolve, reject) => {
                             reader.onload = () => resolve(reader.result as string);
@@ -145,7 +160,6 @@ const BulkCardEditor: React.FC = () => {
                         });
                         const dataUrl = await dataUrlPromise;
 
-                        // Upload to Cloudinary with background removal
                         const uploadFormData = new FormData();
                         uploadFormData.append('file', dataUrl);
                         uploadFormData.append('upload_preset', uploadPreset);
@@ -165,6 +179,7 @@ const BulkCardEditor: React.FC = () => {
 
                         if (uploadData.public_id) {
                             console.log(`✓ Image uploaded with public_id: ${uploadData.public_id}`);
+                            cloudinaryPublicId = uploadData.public_id;
                             processedImageUrl = cld.image(uploadData.public_id)
                                 .effect(backgroundRemoval())
                                 .resize(scale().width(1000))
@@ -179,15 +194,13 @@ const BulkCardEditor: React.FC = () => {
                 } else if (imageUrl.startsWith('data:image')) {
                     if (!uploadPreset) {
                         toast.error('Cloudinary upload preset is missing. Cannot process uploaded image.');
-                        loadImage(imageUrl);
+                        loadImage([imageUrl]);
                         return;
                     }
 
-                    // Convert data URL to blob, compress, then upload
                     const response = await fetch(imageUrl);
                     const blob = await response.blob();
 
-                    // Compress the blob before uploading
                     const blobFile = new File([blob], 'image.jpg', { type: blob.type });
                     const compressedFile = await compressImage(blobFile);
 
@@ -212,6 +225,7 @@ const BulkCardEditor: React.FC = () => {
 
                     if (uploadData.public_id) {
                         console.log(`✓ Image uploaded with public_id: ${uploadData.public_id}`);
+                        cloudinaryPublicId = uploadData.public_id;
                         processedImageUrl = cld.image(uploadData.public_id)
                             .effect(backgroundRemoval())
                             .resize(scale().width(1000))
@@ -223,27 +237,34 @@ const BulkCardEditor: React.FC = () => {
                         throw new Error(uploadData?.error?.message ?? 'Invalid Cloudinary response after upload.');
                     }
                 } else {
-                    // Not a processable URL, just load it
                     const optimizedUrl = imageUrl.startsWith('http') ?
                         cld.image(imageUrl).resize(scale().width(1000)).delivery(quality(auto())).delivery(format(autoFormat())).toURL() :
                         imageUrl;
-                    loadImage(optimizedUrl, imageUrl);
+                    loadImage([optimizedUrl, imageUrl].filter((u, i, arr) => arr.indexOf(u) === i));
                     return;
                 }
 
-                // For the final call to loadImage, we need both the processed URL and the original as fallback
-                const fallbackUrl = cld.image(imageUrl.split('/').pop()?.split('.')[0] || imageUrl)
-                    .resize(scale().width(1000))
-                    .delivery(quality(auto()))
-                    .delivery(format(autoFormat()))
-                    .toURL();
+                const urlsToTry = [processedImageUrl];
+                if (cloudinaryPublicId) {
+                    const cleanUrl = cld.image(cloudinaryPublicId)
+                        .resize(scale().width(1000))
+                        .delivery(quality(auto()))
+                        .delivery(format(autoFormat()))
+                        .toURL();
+                    if (cleanUrl !== processedImageUrl) {
+                        urlsToTry.push(cleanUrl);
+                    }
+                }
+                if (imageUrl !== processedImageUrl && !urlsToTry.includes(imageUrl)) {
+                    urlsToTry.push(imageUrl);
+                }
 
-                loadImage(processedImageUrl, fallbackUrl); // Try processed, fallback to optimized original
+                loadImage(urlsToTry);
                 setPhotoUrl(processedImageUrl);
             } catch (error) {
                 console.error(`Image processing error:`, error);
                 toast.error(`Image processing failed: ${error instanceof Error ? error.message : String(error)}`);
-                loadImage(imageUrl); // Fallback to original on any error
+                loadImage([imageUrl]);
                 setPhotoUrl(imageUrl);
             }
         };
@@ -313,6 +334,15 @@ const BulkCardEditor: React.FC = () => {
     // refs for canvas and photo box (the photo box lives inside IDCardFront)
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const photoBoxRef = useRef<HTMLDivElement | null>(null);
+
+    const [filters, setFilters] = useState({
+        brightness: 1,
+        contrast: 1,
+        saturation: 1,
+        shadow: 0,
+    });
+
+    const [activeTab, setActiveTab] = useState<'details' | 'photo' | 'enhance'>('details');
 
     // track last object URL to revoke it later
     const lastObjectUrlRef = useRef<string | null>(null);
@@ -588,6 +618,15 @@ const BulkCardEditor: React.FC = () => {
             const dx = -editor.tx - editor.img.width / 2;
             const dy = -editor.ty - editor.img.height / 2;
 
+            let filterStr = `brightness(${filters.brightness}) contrast(${filters.contrast}) saturate(${filters.saturation})`;
+            if (filters.shadow > 0) {
+                const i = filters.shadow;
+                const offsetY = Math.round(i * 80);
+                const blur = Math.round(i * 160);
+                const alpha = 0.1 + i * 0.2;
+                filterStr += ` drop-shadow(0 ${offsetY}px ${blur}px rgba(0,0,0,${alpha.toFixed(2)}))`;
+            }
+            oc.filter = filterStr;
             oc.drawImage(editor.img, dx, dy, editor.img.width, editor.img.height);
             oc.restore();
 
@@ -597,7 +636,7 @@ const BulkCardEditor: React.FC = () => {
         } catch (e) {
             console.error('❌ drawEditor error', e);
         }
-    }, [editor, TARGET_W_PX, TARGET_H_PX]);
+    }, [editor, filters, TARGET_W_PX, TARGET_H_PX]);
 
     // redraw whenever editor changes
     useEffect(() => {
@@ -696,6 +735,14 @@ const BulkCardEditor: React.FC = () => {
         if (!editor.img) return;
         setEditor(prev => ({ ...prev, scale: 1, rotation: 0, tx: 0, ty: 0 }));
     }, [editor.img]);
+
+    const handleAutoEnhance = useCallback(() => {
+        setFilters({ brightness: 1.1, contrast: 1.15, saturation: 1.1, shadow: 0 });
+    }, []);
+
+    const handleResetFilters = useCallback(() => {
+        setFilters({ brightness: 1, contrast: 1, saturation: 1, shadow: 0 });
+    }, []);
 
     const handleSaveAndBack = async () => {
         if (!employee.fullName || !employee.employeeId) {
@@ -848,7 +895,8 @@ const BulkCardEditor: React.FC = () => {
             frontCardRef.current,
             backCardRef.current,
             frontLogoDataUrl,
-            backLogoDataUrl
+            backLogoDataUrl,
+            filters
         );
         setZipBlob(blob);
         toast.success('ZIP file generated successfully!');
@@ -901,83 +949,112 @@ const BulkCardEditor: React.FC = () => {
                 message="Saving changes..."
                 position="bottom-right"
             />
-            <AdminHeader />
-            <div className={`fixed top-0 left-0 h-full bg-white dark:bg-background-dark w-64 z-50 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-300 ease-in-out lg:hidden`}>
-                <div className="p-5 border-b border-gray-200 dark:border-gray-700">
-                    <button onClick={() => setSidebarOpen(false)}>
-                        <span className="material-symbols-outlined text-2xl">close</span>
-                    </button>
-                </div>
-                <nav className="flex flex-col p-5 gap-4">
-                    <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="/dashboard">Dashboard</Link>
-                    <Link className="text-primary text-sm font-medium leading-normal" to="/selection">New Batch</Link>
-                    <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="#">Manage Employees</Link>
-                    <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="#">Settings</Link>
-                    <button onClick={logout} className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal flex items-center gap-2">
-                        <span className="material-symbols-outlined text-xl">logout</span>
-                        Logout
-                    </button>
-                </nav>
-            </div>
+            <AppHeader />
 
-            <main className="flex flex-col lg:flex-row">
-                <div className="flex-1 p-4 lg:p-10">
-                    <div className="max-w-7xl mx-auto">
-                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                            <div className="lg:col-span-2">
-                                <div className="space-y-8">
-                                    <IDCardFront
-                                        ref={frontCardRef}
-                                        employee={employee}
-                                        logoSrc={frontLogoDataUrl}
-                                        photoBoxRef={photoBoxRef}
-                                        canvasRef={canvasRef}
-                                        onPointerDown={handlePointerDown}
-                                        onPointerMove={handlePointerMove}
-                                        onPointerUp={handlePointerUp}
-                                        isLoadingImage={isLoadingImage}
-                                    />
-                                    <IDCardBack ref={backCardRef} employee={employee} logoSrc={backLogoDataUrl} />
-                                </div>
-                            </div>
-                            <div>
-                                <div className="bg-white dark:bg-background-dark p-6 rounded-lg shadow-lg">
-                                    <h2 className="text-2xl font-bold mb-6">Edit Employee Details</h2>
-                                    <EmployeeForm employee={employee} onEmployeeChange={setEmployee} />
-                                    <div className="mt-6">
-                                        <h3 className="text-lg font-semibold mb-4">Photo</h3>
-                                        <PhotoUpload
-                                            onPhotoSelect={handlePhotoSelect}
-                                            onHideUploadNote={handleHideUploadNote}
-                                            showUploadNote={showUploadNote}
-                                            editor={editor}
-                                            onZoomIn={handleZoomIn}
-                                            onZoomOut={handleZoomOut}
-                                            onRotateLeft={handleRotateLeft}
-                                            onRotateRight={handleRotateRight}
-                                            onReset={handleResetPos}
-                                            isLoadingImage={isLoadingImage}
-                                        />
-                                    </div>
-                                    <div className="mt-8 flex flex-col gap-4">
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <button
-                                                onClick={handleDownload}
-                                                className="flex items-center justify-center gap-2 rounded-lg bg-gray-100 dark:bg-gray-800 px-4 py-2 text-gray-900 dark:text-white transition-colors hover:bg-gray-200 dark:hover:bg-gray-700"
-                                            >
-                                                <span className="material-symbols-outlined">download</span>
-                                                Download ZIP
-                                            </button>
-                                            <button
-                                                onClick={handleSaveAndBack}
-                                                className="flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-white transition-colors hover:bg-primary/90"
-                                            >
-                                                <span className="material-symbols-outlined">save</span>
-                                                Save & Back
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
+            <main className="max-w-7xl mx-auto p-3 lg:p-6">
+                <button
+                    onClick={() => navigate(-1)}
+                    className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-3 transition-colors"
+                >
+                    <span className="material-symbols-outlined text-lg">arrow_back</span>
+                    Back
+                </button>
+                <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-6">
+                    {/* Left: Card Previews */}
+                    <div className="space-y-4">
+                        <div className="flex flex-col items-center gap-4 lg:flex-row lg:justify-center lg:gap-6">
+                            <IDCardFront
+                                ref={frontCardRef}
+                                employee={employee}
+                                logoSrc={frontLogoDataUrl}
+                                photoBoxRef={photoBoxRef}
+                                canvasRef={canvasRef}
+                                onPointerDown={handlePointerDown}
+                                onPointerMove={handlePointerMove}
+                                onPointerUp={handlePointerUp}
+                                isLoadingImage={isLoadingImage}
+                            />
+                            <IDCardBack ref={backCardRef} employee={employee} logoSrc={backLogoDataUrl} />
+                        </div>
+                    </div>
+
+                    {/* Right: Tabbed Controls Panel */}
+                    <div className="bg-white dark:bg-background-dark rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 overflow-hidden self-start">
+                        {/* Tab Bar */}
+                        <div className="flex border-b border-gray-200 dark:border-gray-700">
+                            {([
+                                { key: 'details', icon: 'badge', label: 'Details' },
+                                { key: 'photo', icon: 'photo_camera', label: 'Photo' },
+                                { key: 'enhance', icon: 'tune', label: 'Enhance' },
+                            ] as const).map(tab => (
+                                <button
+                                    key={tab.key}
+                                    onClick={() => setActiveTab(tab.key)}
+                                    className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-3 text-xs sm:text-sm font-medium transition-colors border-b-2 ${
+                                        activeTab === tab.key
+                                            ? 'border-primary text-primary'
+                                            : 'border-transparent text-muted-foreground hover:text-foreground'
+                                    }`}
+                                >
+                                    <span className="material-symbols-outlined text-lg">{tab.icon}</span>
+                                    {tab.label}
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* Tab Content */}
+                        <div className="p-4">
+                            {activeTab === 'details' && (
+                                <EmployeeForm employee={employee} onEmployeeChange={setEmployee} />
+                            )}
+                            {activeTab === 'photo' && (
+                                <PhotoUpload
+                                    onPhotoSelect={handlePhotoSelect}
+                                    onHideUploadNote={handleHideUploadNote}
+                                    showUploadNote={showUploadNote}
+                                    editor={editor}
+                                    onZoomIn={handleZoomIn}
+                                    onZoomOut={handleZoomOut}
+                                    onRotateLeft={handleRotateLeft}
+                                    onRotateRight={handleRotateRight}
+                                    onReset={handleResetPos}
+                                    isLoadingImage={isLoadingImage}
+                                />
+                            )}
+                            {activeTab === 'enhance' && (
+                                <ImageAdjustments
+                                    brightness={filters.brightness}
+                                    contrast={filters.contrast}
+                                    saturation={filters.saturation}
+                                    shadow={filters.shadow}
+                                    onBrightnessChange={(val) => setFilters(prev => ({ ...prev, brightness: val }))}
+                                    onContrastChange={(val) => setFilters(prev => ({ ...prev, contrast: val }))}
+                                    onSaturationChange={(val) => setFilters(prev => ({ ...prev, saturation: val }))}
+                                    onShadowChange={(val) => setFilters(prev => ({ ...prev, shadow: val }))}
+                                    onAutoEnhance={handleAutoEnhance}
+                                    onResetFilters={handleResetFilters}
+                                    hasImage={!!editor.img}
+                                />
+                            )}
+                        </div>
+
+                        {/* Actions Footer */}
+                        <div className="p-4 border-t border-gray-200 dark:border-gray-700">
+                            <div className="grid grid-cols-2 gap-3">
+                                <button
+                                    onClick={handleDownload}
+                                    className="flex items-center justify-center gap-2 rounded-lg bg-gray-100 dark:bg-gray-800 px-4 py-2.5 text-sm font-medium text-gray-900 dark:text-white transition-colors hover:bg-gray-200 dark:hover:bg-gray-700"
+                                >
+                                    <span className="material-symbols-outlined text-lg">download</span>
+                                    Download ZIP
+                                </button>
+                                <button
+                                    onClick={handleSaveAndBack}
+                                    className="flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-primary/90"
+                                >
+                                    <span className="material-symbols-outlined text-lg">save</span>
+                                    Save & Back
+                                </button>
                             </div>
                         </div>
                     </div>

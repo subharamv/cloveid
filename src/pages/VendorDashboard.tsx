@@ -5,26 +5,34 @@ import ViewRequestModal from '../components/ViewRequestModal';
 import { toast } from 'sonner';
 import JSZip from 'jszip';
 import html2canvas from 'html2canvas';
-import { LogOut, Menu, X, Download, CheckCircle, XCircle, Eye, Printer } from 'lucide-react';
-import logo from '../assets/CLOVE LOGO BLACK.png';
+import { Download, XCircle, Eye, Check, Inbox, Archive, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import { HiddenCardRenderer } from '../components/HiddenCardRenderer';
 import { imageToDataUrl } from '@/lib/utils';
 import cloveLogo from '@/assets/CLOVE LOGO BLACK.png';
 import backLogoSvg from '@/assets/logo svg.png';
 import { jsPDF } from 'jspdf';
+import AppHeader from '../components/AppHeader';
+import { useSearchParams } from 'react-router-dom';
 
 const VendorDashboard = () => {
-    const { user, userRole, logout, clearSession, loading: authLoading } = useAuth();
+    const { user, userRole, loading: authLoading } = useAuth();
+    const [searchParams] = useSearchParams();
+    const tabParam = searchParams.get('tab');
+    const activeTab: 'active' | 'completed' = tabParam === 'completed' ? 'completed' : 'active';
     const [requests, setRequests] = useState<any[]>([]);
     const [viewingRequest, setViewingRequest] = useState<any>(null);
-    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [loading, setLoading] = useState(true);
-    const [newRequestCount, setNewRequestCount] = useState(0);
 
     const [frontLogoDataUrl, setFrontLogoDataUrl] = useState<string>('');
     const [backLogoDataUrl, setBackLogoDataUrl] = useState<string>('');
     const [processingRequest, setProcessingRequest] = useState<any>(null);
-    const [activeTab, setActiveTab] = useState<'active' | 'completed'>('active');
+    const [searchQuery, setSearchQuery] = useState('');
+    const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'yesterday' | '7days' | '30days' | 'custom'>('all');
+    const [customDateStart, setCustomDateStart] = useState('');
+    const [customDateEnd, setCustomDateEnd] = useState('');
+    const [page, setPage] = useState(1);
+    const [perPage, setPerPage] = useState(10);
+    const PAGE_SIZES = [10, 20, 50];
 
     useEffect(() => {
         const loadLogos = async () => {
@@ -43,7 +51,6 @@ const VendorDashboard = () => {
     useEffect(() => {
         if (!authLoading && user && userRole === 'vendor') {
             fetchVendorRequests();
-            // Set up periodic refresh every 30 seconds
             const interval = setInterval(fetchVendorRequests, 30000);
             return () => clearInterval(interval);
         }
@@ -52,12 +59,9 @@ const VendorDashboard = () => {
     const fetchVendorRequests = async () => {
         setLoading(true);
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
 
         try {
-            console.log('Fetching vendor requests for user:', user.id);
-
-            // Fetch vendor requests from the correct table 'vendor_requests'
             const { data: vendorRequestsData, error: vendorRequestsError } = await supabase
                 .from('vendor_requests')
                 .select('*')
@@ -70,20 +74,17 @@ const VendorDashboard = () => {
             if (vendorRequestsError) throw vendorRequestsError;
 
             if (!vendorRequestsData || vendorRequestsData.length === 0) {
-                console.log('No vendor requests found');
                 setRequests([]);
                 setLoading(false);
                 return;
             }
 
-            // Map data using card_details if available, fallback to a request join only if necessary
-            // Using card_details is safer for Vendors due to RLS on the main requests table
             const combinedData = vendorRequestsData.map(vr => {
                 const details = vr.card_details;
                 if (!details) return null;
 
                 return {
-                    id: vr.request_id || vr.id, // Use original request ID if available
+                    id: vr.request_id || vr.id,
                     name: details.fullName || details.name,
                     employeeId: details.employeeId,
                     date: new Date(vr.sent_at).toLocaleDateString(),
@@ -104,7 +105,6 @@ const VendorDashboard = () => {
                 };
             }).filter(Boolean);
 
-            console.log('Processed vendor requests:', combinedData);
             setRequests(combinedData);
         } catch (error) {
             console.error('Error fetching vendor requests:', error);
@@ -116,7 +116,6 @@ const VendorDashboard = () => {
 
     const handleAccept = async (vendorRequestId: number) => {
         try {
-            // Update the vendor_requests status to 'accepted' directly using its ID
             const { error: vendorError } = await supabase
                 .from('vendor_requests')
                 .update({ status: 'accepted' })
@@ -127,7 +126,7 @@ const VendorDashboard = () => {
                 return;
             }
 
-            toast.success('Request accepted successfully! Download button is now available.');
+            toast.success('Request accepted! Download is now available.');
             fetchVendorRequests();
         } catch (error) {
             console.error('Error accepting request:', error);
@@ -137,7 +136,6 @@ const VendorDashboard = () => {
 
     const handleReject = async (vendorRequestId: number) => {
         try {
-            // Update the vendor_requests status to 'rejected' directly using its ID
             const { error: vendorError } = await supabase
                 .from('vendor_requests')
                 .update({ status: 'rejected' })
@@ -148,7 +146,7 @@ const VendorDashboard = () => {
                 return;
             }
 
-            toast.success('Request rejected successfully!');
+            toast.success('Request rejected.');
             fetchVendorRequests();
         } catch (error) {
             console.error('Error rejecting request:', error);
@@ -166,9 +164,8 @@ const VendorDashboard = () => {
                 link.click();
                 document.body.removeChild(link);
 
-                // Update status to completed in database
                 await updateRequestStatus(request);
-                toast.success('ID card downloaded successfully!');
+                toast.success('ID card downloaded!');
                 fetchVendorRequests();
                 return;
             } catch (error) {
@@ -222,10 +219,9 @@ const VendorDashboard = () => {
                 link.download = `${request.name}-id-card.zip`;
                 link.click();
 
-                // Update status to completed in database
                 await updateRequestStatus(request);
 
-                toast.success('ID card downloaded successfully! Status updated.');
+                toast.success('ID card downloaded!');
                 fetchVendorRequests();
             } else {
                 toast.error('Could not find card element to download.');
@@ -239,7 +235,6 @@ const VendorDashboard = () => {
     };
 
     const updateRequestStatus = async (request: any) => {
-        // 1. Update vendor_requests status
         const { error: updateError } = await supabase
             .from('vendor_requests')
             .update({ status: 'completed' })
@@ -247,20 +242,16 @@ const VendorDashboard = () => {
 
         if (updateError) console.error('Error updating vendor_requests status:', updateError);
 
-        // 2. Determine which table to update based on source or IDs present
         let sourceTable = request.source_table || 'requests';
         let updateId = request.request_id;
 
-        // If source_table indicates card_details, use card_details_id
         if (sourceTable === 'card_details' && request.card_details_id) {
             updateId = request.card_details_id;
         } else if (!updateId && request.card_details && request.card_details.id) {
-            // Fallback: check if card_details is an object with id
             sourceTable = 'card_details';
             updateId = request.card_details.id;
         }
 
-        // Update individual request/card_details - set status to 'Printed' and print_status to 'printed'
         if (!request.batch_id && updateId) {
             const { error: recordUpdateError } = await supabase
                 .from(sourceTable)
@@ -268,7 +259,6 @@ const VendorDashboard = () => {
                 .eq('id', updateId);
             if (recordUpdateError) console.error(`Error updating ${sourceTable} status:`, recordUpdateError);
         } else if (request.batch_id) {
-            // For requests from batch, update their status to 'Printed' through the appropriate table
             const { error: batchUpdateError } = await supabase
                 .from(sourceTable)
                 .update({ status: 'Printed', print_status: 'printed' })
@@ -276,7 +266,6 @@ const VendorDashboard = () => {
             if (batchUpdateError) console.error(`Error updating ${sourceTable} batch status:`, batchUpdateError);
         }
 
-        // 3. Update bulk card if it belongs to a batch
         if (request.batch_id) {
             if (request.id_card_id) {
                 const { error: bulkUpdateError } = await supabase
@@ -302,7 +291,6 @@ const VendorDashboard = () => {
                 }
             }
 
-            // Check if all cards in batch are printed
             const { data: remainingCards } = await supabase
                 .from('id_cards')
                 .select('id')
@@ -318,159 +306,369 @@ const VendorDashboard = () => {
         }
     };
 
+    useEffect(() => {
+        setPage(1);
+    }, [searchQuery, dateFilter, customDateStart, customDateEnd, activeTab]);
+
+    const getDateRange = () => {
+        const now = new Date();
+        const start = new Date(now);
+        start.setHours(0, 0, 0, 0);
+        switch (dateFilter) {
+            case 'today':
+                return { start, end: now };
+            case 'yesterday':
+                start.setDate(start.getDate() - 1);
+                const yesterdayEnd = new Date(start);
+                yesterdayEnd.setHours(23, 59, 59, 999);
+                return { start, end: yesterdayEnd };
+            case '7days':
+                start.setDate(start.getDate() - 7);
+                return { start, end: now };
+            case '30days':
+                start.setMonth(start.getMonth() - 1);
+                return { start, end: now };
+            case 'custom':
+                return {
+                    start: customDateStart ? new Date(customDateStart + 'T00:00:00') : null,
+                    end: customDateEnd ? new Date(customDateEnd + 'T23:59:59') : null
+                };
+            default:
+                return { start: null, end: null };
+        }
+    };
+
+    const dateRange = getDateRange();
+    const searchedAndFiltered = requests.filter(r => {
+        const tabMatch = activeTab === 'active' ? r.vendor_status !== 'completed' : r.vendor_status === 'completed';
+        if (!tabMatch) return false;
+        if (searchQuery) {
+            const q = searchQuery.toLowerCase();
+            const nameMatch = r.name?.toLowerCase().includes(q);
+            const idMatch = r.employeeId?.toLowerCase().includes(q);
+            const branchMatch = r.branch?.toLowerCase().includes(q);
+            if (!nameMatch && !idMatch && !branchMatch) return false;
+        }
+        if (dateRange.start && dateRange.end) {
+            const sentDate = new Date(r.sent_at);
+            if (sentDate < dateRange.start || sentDate > dateRange.end) return false;
+        } else if (dateRange.start) {
+            if (new Date(r.sent_at) < dateRange.start) return false;
+        } else if (dateRange.end) {
+            if (new Date(r.sent_at) > dateRange.end) return false;
+        }
+        return true;
+    });
+
+    const totalPages = Math.max(1, Math.ceil(searchedAndFiltered.length / perPage));
+    const safePage = Math.min(page, totalPages);
+    const paginatedRequests = searchedAndFiltered.slice((safePage - 1) * perPage, safePage * perPage);
+
+    useEffect(() => {
+        if (page > totalPages) setPage(totalPages);
+    }, [page, totalPages]);
+
+    const StatusBadge = ({ status }: { status: string }) => {
+        const config: Record<string, { bg: string; text: string; dot: string }> = {
+            sent: { bg: 'bg-yellow-100 dark:bg-yellow-900/30', text: 'text-yellow-800 dark:text-yellow-400', dot: 'bg-yellow-500' },
+            accepted: { bg: 'bg-green-100 dark:bg-green-900/30', text: 'text-green-800 dark:text-green-400', dot: 'bg-green-500' },
+            rejected: { bg: 'bg-red-100 dark:bg-red-900/30', text: 'text-red-800 dark:text-red-400', dot: 'bg-red-500' },
+            completed: { bg: 'bg-blue-100 dark:bg-blue-900/30', text: 'text-blue-800 dark:text-blue-400', dot: 'bg-blue-500' },
+        };
+        const c = config[status] || { bg: 'bg-gray-100 dark:bg-gray-800', text: 'text-gray-800 dark:text-gray-300', dot: 'bg-gray-500' };
+        return (
+            <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${c.bg} ${c.text}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${c.dot}`} />
+                {status}
+            </span>
+        );
+    };
+
     return (
-        <div className="flex h-screen bg-gray-100">
-            {/* Sidebar */}
-            <aside className={`bg-gray-100 text-black w-64 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-300 ease-in-out md:translate-x-0 md:relative`}>
-                <div className="p-4 flex justify-between items-center">
-                    <div className="flex items-center">
-                        <img src={logo} alt="Clove Dental" className="h-10 mr-3" />
-
-                    </div>
-                    <button className="md:hidden" onClick={() => setIsSidebarOpen(false)}>
-                        <X size={24} />
-                    </button>
-                </div>
-                <nav className="mt-10">
-                    <button
-                        onClick={() => setActiveTab('active')}
-                        className={`w-full flex items-center px-4 py-2 hover:bg-gray-200 transition-colors ${activeTab === 'active' ? 'bg-gray-200 text-black font-semibold' : 'text-gray-800'}`}
-                    >
-                        <Menu className="mr-3" size={20} />
-                        Active Requests
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('completed')}
-                        className={`w-full flex items-center px-4 py-2 hover:bg-gray-200 transition-colors ${activeTab === 'completed' ? 'bg-gray-200 text-black font-semibold' : 'text-gray-800'}`}
-                    >
-                        <CheckCircle className="mr-3" size={20} />
-                        Completed Cards
-                    </button>
-                </nav>
-                <div className="absolute bottom-0 w-full p-4 space-y-2">
-                    <button
-                        onClick={clearSession}
-                        className="w-full flex items-center justify-center px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700"
-                    >
-                        <XCircle className="mr-2" />
-                        Clear Session
-                    </button>
-                    <button
-                        onClick={logout}
-                        className="w-full flex items-center justify-center px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
-                    >
-                        <LogOut className="mr-2" />
-                        Logout
-                    </button>
-                </div>
-            </aside>
-
-            {/* Main Content */}
-            <div className="flex-1 flex flex-col overflow-hidden">
-                <header className="bg-white shadow-md p-4 flex justify-between items-center">
-                    <button className="md:hidden" onClick={() => setIsSidebarOpen(true)}>
-                        <Menu size={24} />
-                    </button>
-                    <h1 className="text-2xl font-bold text-gray-800">{activeTab === 'active' ? 'Active Requests' : 'Completed Cards'}</h1>
-                    <div className="flex items-center">
-                        <span className="mr-4">Welcome, {user?.email}</span>
-                    </div>
-                </header>
-
-                <main className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-200 p-6">
-                    {loading ? (
-                        <div className="flex justify-center items-center h-full">
-                            <div className="loader">Loading...</div>
+        <div className="min-h-screen bg-gray-100 dark:bg-gray-950">
+            <AppHeader />
+            <main className="p-4 lg:p-6">
+                {loading ? (
+                        <div className="flex flex-col items-center justify-center h-full py-20">
+                            <svg className="animate-spin w-8 h-8 text-primary mb-3" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                            </svg>
+                            <p className="text-sm text-muted-foreground">Loading requests...</p>
                         </div>
                     ) : (
-                        <div className="bg-white p-6 rounded-lg shadow-lg">
-                            <div className="overflow-x-auto">
-                                <table className="min-w-full bg-white dark:bg-background-dark border border-gray-200 dark:border-gray-700">
-                                    <thead>
-                                        <tr className="bg-gray-100 dark:bg-gray-800">
-                                            <th className="py-3 px-4 text-left text-sm font-medium text-gray-600 dark:text-gray-300">ID</th>
-                                            <th className="py-3 px-4 text-left text-sm font-medium text-gray-600 dark:text-gray-300">Full Name</th>
-                                            <th className="py-3 px-4 text-left text-sm font-medium text-gray-600 dark:text-gray-300">Employee ID</th>
-                                            <th className="py-3 px-4 text-left text-sm font-medium text-gray-600 dark:text-gray-300">Branch</th>
-                                            <th className="py-3 px-4 text-left text-sm font-medium text-gray-600 dark:text-gray-300">Status</th>
-                                            <th className="py-3 px-4 text-left text-sm font-medium text-gray-600 dark:text-gray-300">Sent At</th>
-                                            <th className="py-3 px-4 text-left text-sm font-medium text-gray-600 dark:text-gray-300">Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {requests.filter(request => activeTab === 'active' ? request.vendor_status !== 'completed' : request.vendor_status === 'completed').length === 0 ? (
-                                            <tr>
-                                                <td colSpan={7} className="py-10 text-center text-gray-500">
-                                                    No {activeTab === 'active' ? 'active' : 'completed'} requests found.
-                                                </td>
-                                            </tr>
-                                        ) : (
-                                            requests
-                                                .filter(request => activeTab === 'active' ? request.vendor_status !== 'completed' : request.vendor_status === 'completed')
-                                                .map(request => (
-                                                    <tr key={request.id} className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                                                        <td className="py-3 px-4 text-sm text-gray-800 dark:text-gray-200">{request.id}</td>
-                                                        <td className="py-3 px-4 text-sm text-gray-800 dark:text-gray-200">{request.name}</td>
-                                                        <td className="py-3 px-4 text-sm text-gray-800 dark:text-gray-200">{request.employeeId}</td>
-                                                        <td className="py-3 px-4 text-sm text-gray-800 dark:text-gray-200">{request.branch}</td>
-                                                        <td className="py-3 px-4 text-sm">
-                                                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${request.vendor_status === 'accepted' ? 'bg-green-100 text-green-800' :
-                                                                request.vendor_status === 'rejected' ? 'bg-red-100 text-red-800' :
-                                                                    request.vendor_status === 'completed' ? 'bg-blue-100 text-blue-800' :
-                                                                        'bg-yellow-100 text-yellow-800'
-                                                                }`}>
-                                                                {request.vendor_status}
-                                                            </span>
-                                                        </td>
-                                                        <td className="py-3 px-4 text-sm text-gray-800 dark:text-gray-200">{new Date(request.sent_at).toLocaleString()}</td>
-                                                        <td className="py-3 px-4 text-sm">
-                                                            <div className="flex flex-wrap gap-2">
-                                                                <button
-                                                                    onClick={() => setViewingRequest(request)}
-                                                                    className="p-1 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-white dark:hover:bg-gray-700"
-                                                                    title="View Request"
-                                                                >
-                                                                    <Eye size={18} />
-                                                                </button>
-
-                                                                {request.vendor_status === 'sent' && (
-                                                                    <>
-                                                                        <button
-                                                                            onClick={() => handleAccept(request.vendor_request_id)}
-                                                                            className="bg-green-500 text-white px-3 py-1 rounded-md hover:bg-green-600 text-xs font-medium"
-                                                                        >
-                                                                            Accept
-                                                                        </button>
-                                                                        <button
-                                                                            onClick={() => handleReject(request.vendor_request_id)}
-                                                                            className="bg-red-500 text-white px-3 py-1 rounded-md hover:bg-red-600 text-xs font-medium"
-                                                                        >
-                                                                            Reject
-                                                                        </button>
-                                                                    </>
-                                                                )}
-
-                                                                {(request.vendor_status === 'accepted' || request.vendor_status === 'completed') && (
-                                                                    <button
-                                                                        onClick={() => handleDownload(request)}
-                                                                        className="p-1 rounded-md text-blue-600 hover:text-blue-900 hover:bg-blue-100 dark:text-blue-400 dark:hover:text-blue-300 dark:hover:bg-gray-700"
-                                                                        title="Download ID Card"
-                                                                    >
-                                                                        <Download size={18} />
-                                                                    </button>
-                                                                )}
-                                                            </div>
-                                                        </td>
-                                                    </tr>
-                                                )))}
-                                    </tbody>
-                                </table>
+                        <>
+                            {/* Filters */}
+                            <div className="mb-4 space-y-3">
+                                <div className="flex flex-col sm:flex-row gap-3">
+                                    <div className="relative flex-1">
+                                        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                                        <input
+                                            type="text"
+                                            placeholder="Search by name, ID, branch..."
+                                            value={searchQuery}
+                                            onChange={(e) => setSearchQuery(e.target.value)}
+                                            className="w-full pl-9 pr-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-foreground placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
+                                        />
+                                    </div>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                    {(['all', 'today', 'yesterday', '7days', '30days', 'custom'] as const).map((key) => (
+                                        <button
+                                            key={key}
+                                            onClick={() => setDateFilter(key)}
+                                            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                                                dateFilter === key
+                                                    ? 'bg-primary text-white shadow-sm'
+                                                    : 'bg-white dark:bg-gray-900 text-muted-foreground border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
+                                            }`}
+                                        >
+                                            {key === 'all' ? 'All' : key === 'today' ? 'Today' : key === 'yesterday' ? 'Yesterday' : key === '7days' ? '7 Days' : key === '30days' ? '1 Month' : 'Custom'}
+                                        </button>
+                                    ))}
+                                    {dateFilter === 'custom' && (
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="date"
+                                                value={customDateStart}
+                                                onChange={(e) => setCustomDateStart(e.target.value)}
+                                                className="px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                                            />
+                                            <span className="text-xs text-muted-foreground">to</span>
+                                            <input
+                                                type="date"
+                                                value={customDateEnd}
+                                                onChange={(e) => setCustomDateEnd(e.target.value)}
+                                                className="px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                                            />
+                                        </div>
+                                    )}
+                                </div>
                             </div>
-                        </div>
+
+                            {searchedAndFiltered.length === 0 ? (
+                                <div className="flex flex-col items-center justify-center py-20">
+                                    <div className="w-16 h-16 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center mb-4">
+                                        {activeTab === 'active' ? <Inbox size={28} className="text-muted-foreground" /> : <Archive size={28} className="text-muted-foreground" />}
+                                    </div>
+                                    <p className="text-sm font-medium text-foreground">No {activeTab} requests</p>
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                        {searchQuery || dateFilter !== 'all' ? 'No results match your filters.' : (activeTab === 'active' ? 'New requests will appear here when sent by admin.' : 'Completed requests will appear here.')}
+                                    </p>
+                                </div>
+                            ) : (
+                                <>
+                                    {/* Desktop Table */}
+                                    <div className="hidden md:block bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden">
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full">
+                                                <thead>
+                                                    <tr className="bg-gray-50 dark:bg-gray-900/50 border-b border-gray-100 dark:border-gray-800">
+                                                        <th className="py-3.5 px-5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">ID</th>
+                                                        <th className="py-3.5 px-5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Name</th>
+                                                        <th className="py-3.5 px-5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Employee ID</th>
+                                                        <th className="py-3.5 px-5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Branch</th>
+                                                        <th className="py-3.5 px-5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Status</th>
+                                                        <th className="py-3.5 px-5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Sent At</th>
+                                                        <th className="py-3.5 px-5 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">Actions</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                                                    {paginatedRequests.map((request) => (
+                                                        <tr key={request.id} className="hover:bg-gray-50 dark:hover:bg-gray-900/30 transition-colors">
+                                                            <td className="py-4 px-5 text-sm font-mono text-muted-foreground">{request.id}</td>
+                                                            <td className="py-4 px-5 text-sm font-medium text-foreground">{request.name}</td>
+                                                            <td className="py-4 px-5 text-sm text-muted-foreground">{request.employeeId}</td>
+                                                            <td className="py-4 px-5 text-sm text-muted-foreground">{request.branch}</td>
+                                                            <td className="py-4 px-5"><StatusBadge status={request.vendor_status} /></td>
+                                                            <td className="py-4 px-5 text-sm text-muted-foreground">{new Date(request.sent_at).toLocaleString()}</td>
+                                                            <td className="py-4 px-5 text-right">
+                                                                <div className="flex items-center justify-end gap-1.5">
+                                                                    <button
+                                                                        onClick={() => setViewingRequest(request)}
+                                                                        className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                                                                        title="View"
+                                                                    >
+                                                                        <Eye size={16} />
+                                                                    </button>
+
+                                                                    {request.vendor_status === 'sent' && (
+                                                                        <>
+                                                                            <button
+                                                                                onClick={() => handleAccept(request.vendor_request_id)}
+                                                                                className="px-3 py-1.5 bg-green-500 hover:bg-green-600 text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-1"
+                                                                            >
+                                                                                <Check size={14} />
+                                                                                Accept
+                                                                            </button>
+                                                                            <button
+                                                                                onClick={() => handleReject(request.vendor_request_id)}
+                                                                                className="px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-1"
+                                                                            >
+                                                                                <XCircle size={14} />
+                                                                                Reject
+                                                                            </button>
+                                                                        </>
+                                                                    )}
+
+                                                                    {(request.vendor_status === 'accepted' || request.vendor_status === 'completed') && (
+                                                                        <button
+                                                                            onClick={() => handleDownload(request)}
+                                                                            className="p-2 rounded-lg text-blue-600 hover:text-blue-800 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                                                                            title="Download"
+                                                                        >
+                                                                            <Download size={16} />
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+
+                                        {/* Pagination */}
+                                        {searchedAndFiltered.length > 0 && (
+                                            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-5 py-4 border-t border-gray-100 dark:border-gray-800">
+                                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                                    <span>Rows per page:</span>
+                                                    <select
+                                                        value={perPage}
+                                                        onChange={(e) => { setPerPage(Number(e.target.value)); setPage(1); }}
+                                                        className="py-1 px-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                                                    >
+                                                        {PAGE_SIZES.map(size => (
+                                                            <option key={size} value={size}>{size}</option>
+                                                        ))}
+                                                    </select>
+                                                    <span className="ml-2">{searchedAndFiltered.length} total</span>
+                                                </div>
+                                                <div className="flex items-center gap-1">
+                                                    <button
+                                                        onClick={() => setPage(1)}
+                                                        disabled={safePage === 1}
+                                                        className="px-2 py-1 text-sm text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                                    >
+                                                        {'<<'}
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setPage(safePage - 1)}
+                                                        disabled={safePage === 1}
+                                                        className="px-2 py-1 text-sm text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                                    >
+                                                        <ChevronLeft size={16} />
+                                                    </button>
+                                                    <span className="px-3 py-1 text-sm text-foreground font-medium">
+                                                        Page {safePage} of {totalPages}
+                                                    </span>
+                                                    <button
+                                                        onClick={() => setPage(safePage + 1)}
+                                                        disabled={safePage === totalPages}
+                                                        className="px-2 py-1 text-sm text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                                    >
+                                                        <ChevronRight size={16} />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setPage(totalPages)}
+                                                        disabled={safePage === totalPages}
+                                                        className="px-2 py-1 text-sm text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                                    >
+                                                        {'>>'}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Mobile Cards */}
+                                    <div className="md:hidden space-y-3">
+                                        {paginatedRequests.map((request) => (
+                                            <div key={request.id} className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm p-4 space-y-3">
+                                                <div className="flex items-start justify-between">
+                                                    <div className="space-y-0.5">
+                                                        <p className="text-sm font-medium text-foreground">{request.name}</p>
+                                                        <p className="text-xs text-muted-foreground">ID: {request.employeeId}</p>
+                                                        <p className="text-xs text-muted-foreground">{request.branch}</p>
+                                                    </div>
+                                                    <StatusBadge status={request.vendor_status} />
+                                                </div>
+                                                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                                                    <span>#{request.id}</span>
+                                                    <span>{new Date(request.sent_at).toLocaleString()}</span>
+                                                </div>
+                                                <div className="flex gap-2 pt-1 border-t border-gray-100 dark:border-gray-800">
+                                                    <button
+                                                        onClick={() => setViewingRequest(request)}
+                                                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 text-xs font-medium text-muted-foreground hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                                                    >
+                                                        <Eye size={14} />
+                                                        View
+                                                    </button>
+                                                    {request.vendor_status === 'sent' && (
+                                                        <>
+                                                            <button
+                                                                onClick={() => handleAccept(request.vendor_request_id)}
+                                                                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-green-500 hover:bg-green-600 text-white text-xs font-medium transition-colors"
+                                                            >
+                                                                <Check size={14} />
+                                                                Accept
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleReject(request.vendor_request_id)}
+                                                                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white text-xs font-medium transition-colors"
+                                                            >
+                                                                <XCircle size={14} />
+                                                                Reject
+                                                            </button>
+                                                        </>
+                                                    )}
+                                                    {(request.vendor_status === 'accepted' || request.vendor_status === 'completed') && (
+                                                        <button
+                                                            onClick={() => handleDownload(request)}
+                                                            className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white text-xs font-medium transition-colors"
+                                                        >
+                                                            <Download size={14} />
+                                                            Download
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    {/* Mobile Pagination */}
+                                    {searchedAndFiltered.length > 0 && (
+                                        <div className="md:hidden flex flex-col items-center gap-3 mt-4 px-2">
+                                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                                <span>Rows:</span>
+                                                <select
+                                                    value={perPage}
+                                                    onChange={(e) => { setPerPage(Number(e.target.value)); setPage(1); }}
+                                                    className="py-1 px-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                                                >
+                                                    {PAGE_SIZES.map(size => (
+                                                        <option key={size} value={size}>{size}</option>
+                                                    ))}
+                                                </select>
+                                                <span>{searchedAndFiltered.length} total</span>
+                                            </div>
+                                            <div className="flex items-center gap-1">
+                                                <button onClick={() => setPage(1)} disabled={safePage === 1} className="px-2 py-1 text-sm text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors">{'<<'}</button>
+                                                <button onClick={() => setPage(safePage - 1)} disabled={safePage === 1} className="px-2 py-1 text-sm text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"><ChevronLeft size={16} /></button>
+                                                <span className="px-3 py-1 text-sm text-foreground font-medium">Page {safePage} of {totalPages}</span>
+                                                <button onClick={() => setPage(safePage + 1)} disabled={safePage === totalPages} className="px-2 py-1 text-sm text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"><ChevronRight size={16} /></button>
+                                                <button onClick={() => setPage(totalPages)} disabled={safePage === totalPages} className="px-2 py-1 text-sm text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors">{'>>'}</button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </>
+                            )}
+                        </>
                     )}
                 </main>
-            </div>
 
+            {/* View Request Modal */}
             {viewingRequest && (
                 <ViewRequestModal
                     request={{

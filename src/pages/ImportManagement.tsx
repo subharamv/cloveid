@@ -1,10 +1,9 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { useLocation, useNavigate, Link } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import logo from '@/assets/CLOVE LOGO BLACK.png';
 import JSZip from 'jszip';
-import { useAuth } from '@/hooks/useAuth';
-import AdminHeader from '../components/AdminHeader';
+import AppHeader from '../components/AppHeader';
 import { supabase } from '@/lib/supabaseClient';
 import html2canvas from 'html2canvas';
 import { HiddenCardRenderer } from '../components/HiddenCardRenderer';
@@ -17,12 +16,10 @@ import { Box } from 'lucide-react';
 const ImportManagement = () => {
     const location = useLocation();
     const navigate = useNavigate();
-    const { logout } = useAuth();
     const { initialCsvData = [], headers: initialHeaders = [] } = location.state || {};
     const [csvData, setCsvData] = useState(initialCsvData);
     const [headers, setHeaders] = useState<string[]>(initialHeaders);
     const [searchQuery, setSearchQuery] = useState('');
-    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
     const [filterAvailableOnly, setFilterAvailableOnly] = useState(false);
     const [zipUrls, setZipUrls] = useState<Record<number, string>>(location.state?.zipUrls || {});
@@ -1185,7 +1182,7 @@ const ImportManagement = () => {
     return (
         <div className="relative flex h-auto min-h-screen w-full flex-col bg-background-light dark:bg-background-dark group/design-root overflow-x-hidden">
             <div className="layout-container flex h-full grow flex-col">
-                <AdminHeader setIsSidebarOpen={setIsSidebarOpen} activeTab="selection" />
+                <AppHeader />
                 <main className="flex-1 px-4 sm:px-6 lg:px-8 py-8">
                     <div className="layout-content-container flex flex-col max-w-7xl mx-auto flex-1">
                         <div className="flex flex-wrap justify-between items-center gap-4 mb-6">
@@ -1471,26 +1468,7 @@ const ImportManagement = () => {
                     </div>
                 </main>
             </div>
-            {isSidebarOpen && (
-                <div className="fixed inset-0 bg-gray-800 bg-opacity-50 z-40 lg:hidden" onClick={() => setIsSidebarOpen(false)}></div>
-            )}
-            <div className={`fixed top-0 left-0 h-full bg-white dark:bg-background-dark w-64 z-50 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-300 ease-in-out lg:hidden`}>
-                <div className="p-5 border-b border-gray-200 dark:border-gray-700">
-                    <button onClick={() => setIsSidebarOpen(false)}>
-                        <span className="material-symbols-outlined text-2xl">close</span>
-                    </button>
-                </div>
-                <nav className="flex flex-col p-5 gap-4">
-                    <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="/dashboard">Dashboard</Link>
-                    <Link className="text-primary text-sm font-medium leading-normal" to="/selection">New Batch</Link>
-                    <Link className="text-primary text-sm font-medium leading-normal" to="/import-management">Bulk Actions</Link>
-                    <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="#">Settings</Link>
-                    <button onClick={logout} className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal flex items-center gap-2">
-                        <span className="material-symbols-outlined text-xl">logout</span>
-                        Logout
-                    </button>
-                </nav>
-            </div>
+
             {isVendorModalOpen && (
                 <div className="fixed inset-0 bg-gray-800 bg-opacity-50 z-40 flex items-center justify-center">
                     <div className="bg-white dark:bg-background-dark p-6 rounded-lg shadow-lg w-full max-w-md">

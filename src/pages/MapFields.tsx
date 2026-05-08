@@ -1,14 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useLocation, useNavigate, Link } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import logo from '../assets/CLOVE LOGO BLACK.png';
-import { useAuth } from '../hooks/useAuth';
-import AdminHeader from '../components/AdminHeader';
+import AppHeader from '../components/AppHeader';
 
 const MapFields = () => {
     const navigate = useNavigate();
     const location = useLocation();
-    const { logout } = useAuth();
-    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
     const [csvData, setCsvData] = useState<string[][]>([]);
     const [headers, setHeaders] = useState<string[]>([]);
     const [images, setImages] = useState<(string | null)[]>([]);
@@ -204,7 +202,7 @@ const MapFields = () => {
     return (
         <div className="relative flex h-auto min-h-screen w-full flex-col bg-background-light dark:bg-background-dark group/design-root overflow-x-hidden">
             <div className="layout-container flex h-full grow flex-col">
-                <AdminHeader setIsSidebarOpen={setIsSidebarOpen} activeTab="selection" />
+                <AppHeader />
                 <main className="flex-1 p-8">
                     <div className="max-w-7xl mx-auto flex flex-col gap-8">
                         <div className="flex flex-wrap justify-between items-start gap-3">
@@ -334,26 +332,7 @@ const MapFields = () => {
                     </div>
                 </main>
             </div>
-            {isSidebarOpen && (
-                <div className="fixed inset-0 bg-gray-800 bg-opacity-50 z-40 lg:hidden" onClick={() => setIsSidebarOpen(false)}></div>
-            )}
-            <div className={`fixed top-0 left-0 h-full bg-white dark:bg-background-dark w-64 z-50 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-300 ease-in-out lg:hidden`}>
-                <div className="p-5 border-b border-gray-200 dark:border-gray-700">
-                    <button onClick={() => setIsSidebarOpen(false)}>
-                        <span className="material-symbols-outlined text-2xl">close</span>
-                    </button>
-                </div>
-                <nav className="flex flex-col p-5 gap-4">
-                    <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="/dashboard">Dashboard</Link>
-                    <Link className="text-primary text-sm font-medium leading-normal" to="/selection">New Batch</Link>
-                    <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="/manage-requests">Manage Employees</Link>
-                    <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="#">Settings</Link>
-                    <button onClick={logout} className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal flex items-center gap-2">
-                        <span className="material-symbols-outlined text-xl">logout</span>
-                        Logout
-                    </button>
-                </nav>
-            </div>
+
             {isCameraOpen && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
                     <div className="bg-white dark:bg-gray-800 p-4 rounded-lg">

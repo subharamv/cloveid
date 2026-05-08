@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/hooks/useAuth';
-import { Link } from 'react-router-dom';
+
 import logo from '../assets/CLOVE LOGO BLACK.png';
 import { toast } from 'sonner';
 import {
@@ -10,7 +10,7 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import AdminHeader from '../components/AdminHeader';
+import AppHeader from '../components/AppHeader';
 import { UserCheck, UserX, Shield, Trash2, Menu } from 'lucide-react';
 
 interface Profile {
@@ -26,10 +26,9 @@ interface Profile {
 }
 
 const UserManagement = () => {
-    const { logout, session } = useAuth();
+    const { session } = useAuth();
     const [profiles, setProfiles] = useState<Profile[]>([]);
     const [loading, setLoading] = useState(true);
-    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [departmentFilter, setDepartmentFilter] = useState<string>('');
     const [cardMap, setCardMap] = useState<Record<string, any>>({});
 
@@ -122,7 +121,7 @@ const UserManagement = () => {
     return (
         <div className="relative flex h-auto min-h-screen w-full flex-col bg-background-light dark:bg-background-dark">
             <div className="layout-container flex h-full grow flex-col">
-                <AdminHeader setIsSidebarOpen={setIsSidebarOpen} activeTab="settings" />
+                <AppHeader />
 
                 <main className="flex-1 px-4 py-8 sm:px-6 lg:px-10">
                     <div className="mx-auto max-w-7xl">
@@ -219,26 +218,7 @@ const UserManagement = () => {
                     </div >
                 </main >
             </div >
-            {isSidebarOpen && (
-                <div className="fixed inset-0 bg-gray-800 bg-opacity-50 z-40 lg:hidden" onClick={() => setIsSidebarOpen(false)}></div>
-            )}
-            <div className={`fixed top-0 left-0 h-full bg-white dark:bg-background-dark w-64 z-50 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-300 ease-in-out lg:hidden`}>
-                <div className="p-5 border-b border-gray-200 dark:border-gray-700">
-                    <button onClick={() => setIsSidebarOpen(false)}>
-                        <span className="material-symbols-outlined text-2xl">close</span>
-                    </button>
-                </div>
-                <nav className="flex flex-col p-5 gap-4">
-                    <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="/dashboard">Dashboard</Link>
-                    <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="/selection">New Batch</Link>
-                    <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="/manage-requests">Manage Employees</Link>
-                    <Link className="text-primary text-sm font-medium leading-normal" to="/user-management">User Management</Link>
-                    <button onClick={logout} className="text-red-500 hover:text-red-700 text-sm font-medium leading-normal flex items-center gap-2">
-                        <span className="material-symbols-outlined">logout</span>
-                        Logout
-                    </button>
-                </nav>
-            </div>
+
         </div >
     );
 };

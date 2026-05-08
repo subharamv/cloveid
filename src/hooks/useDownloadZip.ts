@@ -4,6 +4,13 @@ import JSZip from 'jszip';
 import { Employee } from '@/types/employee';
 
 // Define types for editor state and dimensions, mirroring their structure in Index.tsx
+export interface ImageFilters {
+  brightness: number;
+  contrast: number;
+  saturation: number;
+  shadow: number;
+}
+
 interface EditorState {
   img: HTMLImageElement | null;
   scale: number;
@@ -25,7 +32,8 @@ export const useDownloadZip = () => {
     frontCard: HTMLElement,
     backCard: HTMLElement,
     frontLogoDataUrl?: string,
-    backLogoDataUrl?: string
+    backLogoDataUrl?: string,
+    filters?: ImageFilters
   ) => {
     try {
       if (!frontCard || !backCard) {
@@ -51,6 +59,17 @@ export const useDownloadZip = () => {
             oc.scale(renderScale, renderScale);
             const dx = -editor.tx - editor.img.width / 2;
             const dy = -editor.ty - editor.img.height / 2;
+            if (filters) {
+              let filterStr = `brightness(${filters.brightness}) contrast(${filters.contrast}) saturate(${filters.saturation})`;
+              if (filters.shadow > 0) {
+                const i = filters.shadow;
+                const offsetY = Math.round(i * 80);
+                const blur = Math.round(i * 160);
+                const alpha = 0.1 + i * 0.2;
+                filterStr += ` drop-shadow(0 ${offsetY}px ${blur}px rgba(0,0,0,${alpha.toFixed(2)}))`;
+              }
+              oc.filter = filterStr;
+            }
             oc.drawImage(editor.img, dx, dy, editor.img.width, editor.img.height);
             oc.restore();
             highResDataUrl = offscreen.toDataURL('image/png');

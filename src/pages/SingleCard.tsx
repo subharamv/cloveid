@@ -1,9 +1,10 @@
 // src/pages/index.tsx
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Employee, PhotoTransform } from '@/types/employee';
 import { EmployeeForm } from '@/components/EmployeeForm';
 import { PhotoUpload } from '@/components/PhotoUpload';
+import { ImageAdjustments } from '@/components/ImageAdjustments';
 import { IDCardFront } from '@/components/IDCardFront';
 import { IDCardBack } from '@/components/IDCardBack';
 import { Modal } from '@/components/Modal';
@@ -22,17 +23,16 @@ import { auto as autoFormat } from "@cloudinary/url-gen/qualifiers/format";
 import { imageToDataUrl, compressImage } from '@/lib/utils';
 import { supabase } from '@/lib/supabaseClient';
 
-import AdminHeader from '../components/AdminHeader';
+import AppHeader from '../components/AppHeader';
 import { useAuth } from '@/hooks/useAuth';
 import { ProgressBar } from '@/components/ProgressBar';
 
 const SingleCard: React.FC = () => {
-    const { userRole, logout } = useAuth();
+    const { userRole } = useAuth();
     const location = useLocation();
     const navigate = useNavigate();
 
     const { downloadZip } = useDownloadZip();
-    const [isSidebarOpen, setSidebarOpen] = useState(false);
     const [frontLogoDataUrl, setFrontLogoDataUrl] = useState<string>('');
     const [backLogoDataUrl, setBackLogoDataUrl] = useState<string>('');
     const [requestId, setRequestId] = useState<string | null>(null);
@@ -122,6 +122,15 @@ const SingleCard: React.FC = () => {
     // refs for canvas and photo box (the photo box lives inside IDCardFront)
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const photoBoxRef = useRef<HTMLDivElement | null>(null);
+
+    const [filters, setFilters] = useState({
+        brightness: 1,
+        contrast: 1,
+        saturation: 1,
+        shadow: 0,
+    });
+
+    const [activeTab, setActiveTab] = useState<'details' | 'photo' | 'enhance'>('details');
 
     // track last object URL to revoke it later
     const lastObjectUrlRef = useRef<string | null>(null);
@@ -384,6 +393,15 @@ const SingleCard: React.FC = () => {
             const dx = -editor.tx - editor.img.width / 2;
             const dy = -editor.ty - editor.img.height / 2;
 
+            let filterStr = `brightness(${filters.brightness}) contrast(${filters.contrast}) saturate(${filters.saturation})`;
+            if (filters.shadow > 0) {
+                const i = filters.shadow;
+                const offsetY = Math.round(i * 80);
+                const blur = Math.round(i * 160);
+                const alpha = 0.1 + i * 0.2;
+                filterStr += ` drop-shadow(0 ${offsetY}px ${blur}px rgba(0,0,0,${alpha.toFixed(2)}))`;
+            }
+            oc.filter = filterStr;
             oc.drawImage(editor.img, dx, dy, editor.img.width, editor.img.height);
             oc.restore();
 
@@ -392,7 +410,7 @@ const SingleCard: React.FC = () => {
         } catch (e) {
             console.error('drawEditor error', e);
         }
-    }, [editor, TARGET_W_PX, TARGET_H_PX]);
+    }, [editor, filters, TARGET_W_PX, TARGET_H_PX]);
 
     // redraw whenever editor changes
     useEffect(() => {
@@ -488,6 +506,14 @@ const SingleCard: React.FC = () => {
         setEditor(prev => ({ ...prev, scale: 1, rotation: 0, tx: 0, ty: 0 }));
     }, [editor.img]);
 
+    const handleAutoEnhance = useCallback(() => {
+        setFilters({ brightness: 1.1, contrast: 1.15, saturation: 1.1, shadow: 0 });
+    }, []);
+
+    const handleResetFilters = useCallback(() => {
+        setFilters({ brightness: 1, contrast: 1, saturation: 1, shadow: 0 });
+    }, []);
+
     // Reset everything (revoke object URL)
     const handleDownloadZip = useCallback(async () => {
         if (!employee.fullName || !employee.employeeId) {
@@ -514,7 +540,7 @@ const SingleCard: React.FC = () => {
             }, {
                 w: TARGET_W_PX,
                 h: TARGET_H_PX,
-            }, frontCard, backCard, frontLogoDataUrl, backLogoDataUrl);
+            }, frontCard, backCard, frontLogoDataUrl, backLogoDataUrl, filters);
 
             // Create download link
             const url = URL.createObjectURL(zipBlob);
@@ -533,7 +559,7 @@ const SingleCard: React.FC = () => {
         } catch (error) {
             toast.error('Failed to download ZIP file. Please try again.');
         }
-    }, [employee, downloadZip, frontLogoDataUrl, backLogoDataUrl, editor.img, editor.rotation, editor.scale, editor.tx, editor.ty, TARGET_W_PX, TARGET_H_PX]);
+    }, [employee, downloadZip, frontLogoDataUrl, backLogoDataUrl, editor.img, editor.rotation, editor.scale, editor.tx, editor.ty, filters, TARGET_W_PX, TARGET_H_PX]);
 
     const generateCardCanvas = useCallback((cardElement: HTMLElement, isFront: boolean) => {
         return new Promise<HTMLCanvasElement>((resolve, reject) => {
@@ -578,6 +604,15 @@ const SingleCard: React.FC = () => {
                         const dx = -editor.tx - editor.img.width / 2;
                         const dy = -editor.ty - editor.img.height / 2;
 
+                        let filterStr = `brightness(${filters.brightness}) contrast(${filters.contrast}) saturate(${filters.saturation})`;
+                        if (filters.shadow > 0) {
+                            const i = filters.shadow;
+                            const offsetY = Math.round(i * 80);
+                            const blur = Math.round(i * 160);
+                            const alpha = 0.1 + i * 0.2;
+                            filterStr += ` drop-shadow(0 ${offsetY}px ${blur}px rgba(0,0,0,${alpha.toFixed(2)}))`;
+                        }
+                        oc.filter = filterStr;
                         oc.drawImage(editor.img, dx, dy, editor.img.width, editor.img.height);
                         oc.restore();
 
@@ -589,7 +624,7 @@ const SingleCard: React.FC = () => {
                 }).then(resolve).catch(reject);
             });
         });
-    }, [editor.img, editor.rotation, editor.scale, editor.tx, editor.ty, TARGET_W_PX, TARGET_H_PX, frontLogoDataUrl, backLogoDataUrl]);
+    }, [editor.img, editor.rotation, editor.scale, editor.tx, editor.ty, filters, TARGET_W_PX, TARGET_H_PX, frontLogoDataUrl, backLogoDataUrl]);
 
     const handleReset = useCallback(() => {
         setEmployee({
@@ -717,7 +752,8 @@ const SingleCard: React.FC = () => {
                 frontCard,
                 backCard,
                 frontLogoDataUrl,
-                backLogoDataUrl
+                backLogoDataUrl,
+                filters
             );
 
             // Upload ZIP to Supabase Storage
@@ -776,186 +812,216 @@ const SingleCard: React.FC = () => {
                 message={imageProcessMessage}
                 position="bottom-right"
             />
-            {/* Header */}
-            <AdminHeader setIsSidebarOpen={setSidebarOpen} activeTab="selection" />
+            <AppHeader />
 
-            {isSidebarOpen && (
-                <div className="fixed inset-0 bg-gray-800 bg-opacity-50 z-40 lg:hidden" onClick={() => setSidebarOpen(false)}></div>
-            )}
-            <div className={`fixed top-0 left-0 h-full bg-white dark:bg-background-dark w-64 z-50 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-300 ease-in-out lg:hidden`}>
-                <div className="p-5 border-b border-gray-200 dark:border-gray-700">
-                    <button onClick={() => setSidebarOpen(false)}>
-                        <span className="material-symbols-outlined text-2xl">close</span>
-                    </button>
-                </div>
-                <nav className="flex flex-col p-5 gap-4">
-                    <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="/dashboard">Dashboard</Link>
-                    <Link className="text-primary text-sm font-medium leading-normal" to="/selection">New Batch</Link>
-                    <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="#">Manage Employees</Link>
-                    <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="#">Settings</Link>
-                    <button onClick={logout} className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal flex items-center gap-2">
-                        <span className="material-symbols-outlined text-xl">logout</span>
-                        Logout
-                    </button>
-                </nav>
-            </div>
-
-            {/* Main Container */}
-            <div className="max-w-[1150px] mx-auto p-3 grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {/* Left Panel - Form + Upload */}
-                <div className="bg-white rounded-xl p-3.5 shadow-sm">
-                    <EmployeeForm employee={employee} onEmployeeChange={setEmployee} />
-
-                    <div className="mt-2.5">
-                        <PhotoUpload
-                            onPhotoSelect={handlePhotoSelect}
-                            currentPhoto={employee.photo}
-                            showUploadNote={showUploadNote}
-                            onHideUploadNote={handleHideUploadNote}
-                            onShowModal={handleShowModal}
-                            isLoadingImage={isLoadingImage}
-                        />
+            <main className="max-w-[1150px] mx-auto p-3 lg:p-6">
+                <button
+                    onClick={() => navigate(-1)}
+                    className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-3 transition-colors"
+                >
+                    <span className="material-symbols-outlined text-lg">arrow_back</span>
+                    Back
+                </button>
+                <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-6">
+                    {/* Left: Card Previews */}
+                    <div className="space-y-4">
+                        <div className="flex flex-col items-center gap-4 lg:flex-row lg:justify-center lg:gap-6">
+                            <div className="id-card-front-container w-[230px] h-[365px] bg-white shadow-sm rounded-lg overflow-hidden">
+                                <IDCardFront
+                                    employee={employee}
+                                    logoSrc={frontLogoDataUrl}
+                                    canvasRef={canvasRef}
+                                    photoBoxRef={photoBoxRef}
+                                    onPointerDown={handlePointerDown}
+                                    onPointerMove={handlePointerMove}
+                                    onPointerUp={handlePointerUp}
+                                    isLoadingImage={isLoadingImage}
+                                />
+                            </div>
+                            <div className="id-card-back-container w-[230px] h-[365px] bg-white shadow-sm rounded-lg overflow-hidden">
+                                <IDCardBack employee={employee} logoSrc={backLogoDataUrl} />
+                            </div>
+                        </div>
                     </div>
 
-                    {/* Photo Controls */}
-                    <div className="flex gap-2 flex-wrap mt-3">
-                        <button onClick={handleZoomIn} className="bg-white border border-input-border p-2 rounded-lg text-lg">＋</button>
-                        <button onClick={handleZoomOut} className="bg-white border border-input-border p-2 rounded-lg text-lg">−</button>
-                        <button onClick={handleRotateLeft} className="bg-white border border-input-border p-2 rounded-lg text-lg">⟲</button>
-                        <button onClick={handleRotateRight} className="bg-white border border-input-border p-2 rounded-lg text-lg">⟳</button>
-                        <button onClick={handleResetPos} className="bg-white border border-input-border p-2 rounded-lg text-sm">0</button>
+                    {/* Right: Tabbed Controls Panel */}
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden self-start">
+                        {/* Tab Bar */}
+                        <div className="flex border-b border-gray-200">
+                            {([
+                                { key: 'details', icon: 'badge', label: 'Details' },
+                                { key: 'photo', icon: 'photo_camera', label: 'Photo' },
+                                { key: 'enhance', icon: 'tune', label: 'Enhance' },
+                            ] as const).map(tab => (
+                                <button
+                                    key={tab.key}
+                                    onClick={() => setActiveTab(tab.key)}
+                                    className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-3 text-xs sm:text-sm font-medium transition-colors border-b-2 ${
+                                        activeTab === tab.key
+                                            ? 'border-primary text-primary'
+                                            : 'border-transparent text-muted-foreground hover:text-foreground'
+                                    }`}
+                                >
+                                    <span className="material-symbols-outlined text-lg">{tab.icon}</span>
+                                    {tab.label}
+                                </button>
+                            ))}
+                        </div>
 
-                        <input
-                            type="range"
-                            min="0.5"
-                            max="3"
-                            step="0.01"
-                            value={editor.scale}
-                            onChange={(e) => setEditor(prev => ({ ...prev, scale: parseFloat(e.target.value) }))}
-                            className="w-[150px]"
-                        />
-                    </div>
+                        {/* Tab Content */}
+                        <div className="p-4">
+                            {activeTab === 'details' && (
+                                <EmployeeForm employee={employee} onEmployeeChange={setEmployee} />
+                            )}
+                            {activeTab === 'photo' && (
+                                <div className="space-y-3">
+                                    <PhotoUpload
+                                        onPhotoSelect={handlePhotoSelect}
+                                        currentPhoto={employee.photo}
+                                        showUploadNote={showUploadNote}
+                                        onHideUploadNote={handleHideUploadNote}
+                                        onShowModal={handleShowModal}
+                                        isLoadingImage={isLoadingImage}
+                                    />
+                                    {editor.img && (
+                                        <>
+                                            <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
+                                                <p className="text-sm font-medium text-muted-foreground mb-2">Position & Zoom</p>
+                                                <div className="flex gap-2 flex-wrap">
+                                                    <button onClick={handleZoomIn} disabled={!editor.img} className="flex-1 min-w-[40px] px-2 py-2 text-sm font-medium bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded transition-colors">＋</button>
+                                                    <button onClick={handleZoomOut} disabled={!editor.img} className="flex-1 min-w-[40px] px-2 py-2 text-sm font-medium bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded transition-colors">−</button>
+                                                    <button onClick={handleRotateLeft} disabled={!editor.img} className="flex-1 min-w-[40px] px-2 py-2 text-sm font-medium bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded transition-colors">⟲</button>
+                                                    <button onClick={handleRotateRight} disabled={!editor.img} className="flex-1 min-w-[40px] px-2 py-2 text-sm font-medium bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded transition-colors">⟳</button>
+                                                    <button onClick={handleResetPos} disabled={!editor.img} className="flex-1 min-w-[40px] px-2 py-2 text-sm font-medium bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed text-gray-800 dark:text-gray-200 rounded transition-colors">Reset</button>
+                                                </div>
+                                                <div className="mt-2">
+                                                    <input
+                                                        type="range"
+                                                        min="0.5"
+                                                        max="3"
+                                                        step="0.01"
+                                                        value={editor.scale}
+                                                        onChange={(e) => setEditor(prev => ({ ...prev, scale: parseFloat(e.target.value) }))}
+                                                        className="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full appearance-none cursor-pointer accent-primary [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-sm"
+                                                    />
+                                                    <div className="flex justify-between text-xs text-muted-foreground mt-0.5">
+                                                        <span>Zoom: {editor.scale.toFixed(2)}x</span>
+                                                        <span>Rotation: {Math.round((editor.rotation * 180) / Math.PI)}°</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                            )}
+                            {activeTab === 'enhance' && (
+                                <ImageAdjustments
+                                    brightness={filters.brightness}
+                                    contrast={filters.contrast}
+                                    saturation={filters.saturation}
+                                    shadow={filters.shadow}
+                                    onBrightnessChange={(val) => setFilters(prev => ({ ...prev, brightness: val }))}
+                                    onContrastChange={(val) => setFilters(prev => ({ ...prev, contrast: val }))}
+                                    onSaturationChange={(val) => setFilters(prev => ({ ...prev, saturation: val }))}
+                                    onShadowChange={(val) => setFilters(prev => ({ ...prev, shadow: val }))}
+                                    onAutoEnhance={handleAutoEnhance}
+                                    onResetFilters={handleResetFilters}
+                                    hasImage={!!editor.img}
+                                />
+                            )}
+                        </div>
 
-                    {/* Action Buttons */}
-                    <div className="mt-3">
-                        <ActionButtons
-                            employee={employee}
-                            isPhotoUploaded={!!editor.img}
-                            onSave={handleSave}
-                            setIsSidebarOpen={setSidebarOpen}
-                            onDownloadPNG={async () => {
-                                toast.info('Generating PNG files...');
-
-                                const frontCard = document.querySelector('.id-card-front-container') as HTMLElement;
-                                const backCard = document.querySelector('.id-card-back-container') as HTMLElement;
-
-                                if (!frontCard || !backCard) {
-                                    toast.error('Error generating PNG files: Card elements not found.');
-                                    return;
-                                }
-
-                                try {
-                                    const [frontCanvas, backCanvas] = await Promise.all([
-                                        generateCardCanvas(frontCard, true),
-                                        generateCardCanvas(backCard, false),
-                                    ]);
-
-                                    const downloadCanvasAsPNG = (canvas: HTMLCanvasElement, fileName: string) => {
-                                        canvas.toBlob((blob) => {
-                                            if (blob) {
-                                                const url = URL.createObjectURL(blob);
-                                                const a = document.createElement('a');
-                                                a.href = url;
-                                                a.download = fileName;
-                                                a.click();
-                                                URL.revokeObjectURL(url);
-                                            }
-                                        }, 'image/png', 1.0);
-                                    };
-
-                                    downloadCanvasAsPNG(frontCanvas, `${employee.fullName || 'id'}_front.png`);
-                                    downloadCanvasAsPNG(backCanvas, `${employee.fullName || 'id'}_back.png`);
-
-                                    toast.success('PNG files downloaded successfully!');
-                                } catch (error) {
-                                    console.error('Error generating PNG files:', error);
-                                    toast.error('Error generating PNG files. Please try again.');
-                                }
-                            }}
-                            onDownloadPDF={async () => {
-                                toast.info('Generating PDF document...');
-
-                                const frontCard = document.querySelector('.id-card-front-container') as HTMLElement;
-                                const backCard = document.querySelector('.id-card-back-container') as HTMLElement;
-
-                                if (!frontCard || !backCard) {
-                                    toast.error('Error generating PDF: Card elements not found.');
-                                    return;
-                                }
-
-                                try {
-                                    const [frontCanvas, backCanvas] = await Promise.all([
-                                        generateCardCanvas(frontCard, true),
-                                        generateCardCanvas(backCard, false),
-                                    ]);
-
-                                    const { jsPDF } = await import('jspdf');
-                                    const pdf = new jsPDF({
-                                        orientation: 'portrait',
-                                        unit: 'cm',
-                                        format: [5.3, 8.5]
-                                    });
-
-                                    const frontImgData = frontCanvas.toDataURL('image/png', 1.0);
-                                    const backImgData = backCanvas.toDataURL('image/png', 1.0);
-
-                                    pdf.addImage(frontImgData, 'PNG', 0, 0, 5.3, 8.5);
-                                    pdf.addPage();
-                                    pdf.addImage(backImgData, 'PNG', 0, 0, 5.3, 8.5);
-
-                                    pdf.save(`${employee.fullName || 'id'}_cards.pdf`);
-                                    toast.success('PDF downloaded successfully!');
-                                } catch (error) {
-                                    console.error('Error generating PDF:', error);
-                                    toast.error('Error generating PDF. Please try again.');
-                                }
-                            }}
-                            onDownloadZip={handleDownloadZip}
-                            onPrint={onPrint}
-                            onReset={handleReset}
-                        />
-                    </div>
-                </div>
-
-                {/* Right Panel - Preview */}
-                <div className="bg-white rounded-xl p-3.5 shadow-sm">
-                    <div className="text-center mb-2">
-                        <strong className="text-primary">PREVIEW — FRONT</strong>
-                    </div>
-
-                    <div className="flex flex-col items-center gap-2">
-                        <div className="id-card-front-container w-[230px] h-[365px] bg-white shadow-sm rounded-lg overflow-hidden">
-                            <IDCardFront
+                        {/* Action Buttons */}
+                        <div className="p-4 border-t border-gray-200">
+                            <ActionButtons
                                 employee={employee}
-                                logoSrc={frontLogoDataUrl}
-                                canvasRef={canvasRef}
-                                photoBoxRef={photoBoxRef}
-                                onPointerDown={handlePointerDown}
-                                onPointerMove={handlePointerMove}
-                                onPointerUp={handlePointerUp}
-                                isLoadingImage={isLoadingImage}
+                                isPhotoUploaded={!!editor.img}
+                                onSave={handleSave}
+                                onDownloadPNG={async () => {
+                                    toast.info('Generating PNG files...');
+
+                                    const frontCard = document.querySelector('.id-card-front-container') as HTMLElement;
+                                    const backCard = document.querySelector('.id-card-back-container') as HTMLElement;
+
+                                    if (!frontCard || !backCard) {
+                                        toast.error('Error generating PNG files: Card elements not found.');
+                                        return;
+                                    }
+
+                                    try {
+                                        const [frontCanvas, backCanvas] = await Promise.all([
+                                            generateCardCanvas(frontCard, true),
+                                            generateCardCanvas(backCard, false),
+                                        ]);
+
+                                        const downloadCanvasAsPNG = (canvas: HTMLCanvasElement, fileName: string) => {
+                                            canvas.toBlob((blob) => {
+                                                if (blob) {
+                                                    const url = URL.createObjectURL(blob);
+                                                    const a = document.createElement('a');
+                                                    a.href = url;
+                                                    a.download = fileName;
+                                                    a.click();
+                                                    URL.revokeObjectURL(url);
+                                                }
+                                            }, 'image/png', 1.0);
+                                        };
+
+                                        downloadCanvasAsPNG(frontCanvas, `${employee.fullName || 'id'}_front.png`);
+                                        downloadCanvasAsPNG(backCanvas, `${employee.fullName || 'id'}_back.png`);
+
+                                        toast.success('PNG files downloaded successfully!');
+                                    } catch (error) {
+                                        console.error('Error generating PNG files:', error);
+                                        toast.error('Error generating PNG files. Please try again.');
+                                    }
+                                }}
+                                onDownloadPDF={async () => {
+                                    toast.info('Generating PDF document...');
+
+                                    const frontCard = document.querySelector('.id-card-front-container') as HTMLElement;
+                                    const backCard = document.querySelector('.id-card-back-container') as HTMLElement;
+
+                                    if (!frontCard || !backCard) {
+                                        toast.error('Error generating PDF: Card elements not found.');
+                                        return;
+                                    }
+
+                                    try {
+                                        const [frontCanvas, backCanvas] = await Promise.all([
+                                            generateCardCanvas(frontCard, true),
+                                            generateCardCanvas(backCard, false),
+                                        ]);
+
+                                        const { jsPDF } = await import('jspdf');
+                                        const pdf = new jsPDF({
+                                            orientation: 'portrait',
+                                            unit: 'cm',
+                                            format: [5.3, 8.5]
+                                        });
+
+                                        const frontImgData = frontCanvas.toDataURL('image/png', 1.0);
+                                        const backImgData = backCanvas.toDataURL('image/png', 1.0);
+
+                                        pdf.addImage(frontImgData, 'PNG', 0, 0, 5.3, 8.5);
+                                        pdf.addPage();
+                                        pdf.addImage(backImgData, 'PNG', 0, 0, 5.3, 8.5);
+
+                                        pdf.save(`${employee.fullName || 'id'}_cards.pdf`);
+                                        toast.success('PDF downloaded successfully!');
+                                    } catch (error) {
+                                        console.error('Error generating PDF:', error);
+                                        toast.error('Error generating PDF. Please try again.');
+                                    }
+                                }}
+                                onDownloadZip={handleDownloadZip}
+                                onPrint={onPrint}
+                                onReset={handleReset}
                             />
                         </div>
-
-                        <div className="text-center mt-4 mb-2">
-                            <strong className="text-primary">PREVIEW — BACK</strong>
-                        </div>
-                        <div className="id-card-back-container w-[230px] h-[365px] bg-white shadow-sm rounded-lg overflow-hidden">
-                            <IDCardBack employee={employee} logoSrc={backLogoDataUrl} />
-                        </div>
                     </div>
                 </div>
-            </div >
+            </main>
 
             <Modal
                 isOpen={modal.isOpen}
@@ -964,7 +1030,7 @@ const SingleCard: React.FC = () => {
                 title={modal.title}
                 message={modal.message}
             />
-        </div >
+        </div>
     );
 };
 

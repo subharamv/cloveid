@@ -3,6 +3,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Employee } from '@/types/employee';
 import { EmployeeForm } from '@/components/EmployeeForm';
 import { PhotoUpload } from '@/components/PhotoUpload';
+import { ImageAdjustments } from '@/components/ImageAdjustments';
 import { IDCardFront } from '@/components/IDCardFront';
 import { IDCardBack } from '@/components/IDCardBack';
 import { Modal } from '@/components/Modal';
@@ -21,15 +22,12 @@ import { auto as autoFormat } from "@cloudinary/url-gen/qualifiers/format";
 import { imageToDataUrl, compressImage } from '@/lib/utils';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabaseClient';
-import AdminHeader from '../components/AdminHeader';
-import { useAuth } from '@/hooks/useAuth';
+import AppHeader from '../components/AppHeader';
 
 const EditRequest: React.FC = () => {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
-    const { logout } = useAuth();
     const { downloadZip } = useDownloadZip();
-    const [isSidebarOpen, setSidebarOpen] = useState(false);
     const [frontLogoDataUrl, setFrontLogoDataUrl] = useState<string>('');
     const [backLogoDataUrl, setBackLogoDataUrl] = useState<string>('');
     const [photoUrl, setPhotoUrl] = useState<string | null>(null);
@@ -63,6 +61,15 @@ const EditRequest: React.FC = () => {
     // refs for canvas and photo box (the photo box lives inside IDCardFront)
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const photoBoxRef = useRef<HTMLDivElement | null>(null);
+
+    const [filters, setFilters] = useState({
+        brightness: 1,
+        contrast: 1,
+        saturation: 1,
+        shadow: 0,
+    });
+
+    const [activeTab, setActiveTab] = useState<'details' | 'photo' | 'enhance'>('details');
 
     // track last object URL to revoke it later
     const lastObjectUrlRef = useRef<string | null>(null);
@@ -338,6 +345,15 @@ const EditRequest: React.FC = () => {
             const dx = -editor.tx - editor.img.width / 2;
             const dy = -editor.ty - editor.img.height / 2;
 
+            let filterStr = `brightness(${filters.brightness}) contrast(${filters.contrast}) saturate(${filters.saturation})`;
+            if (filters.shadow > 0) {
+                const i = filters.shadow;
+                const offsetY = Math.round(i * 80);
+                const blur = Math.round(i * 160);
+                const alpha = 0.1 + i * 0.2;
+                filterStr += ` drop-shadow(0 ${offsetY}px ${blur}px rgba(0,0,0,${alpha.toFixed(2)}))`;
+            }
+            oc.filter = filterStr;
             oc.drawImage(editor.img, dx, dy, editor.img.width, editor.img.height);
             oc.restore();
 
@@ -346,7 +362,7 @@ const EditRequest: React.FC = () => {
         } catch (e) {
             console.error('drawEditor error', e);
         }
-    }, [editor, TARGET_W_PX, TARGET_H_PX]);
+    }, [editor, filters, TARGET_W_PX, TARGET_H_PX]);
 
     // redraw whenever editor changes
     useEffect(() => {
@@ -441,6 +457,14 @@ const EditRequest: React.FC = () => {
         if (!editor.img) return;
         setEditor(prev => ({ ...prev, scale: 1, rotation: 0, tx: 0, ty: 0 }));
     }, [editor.img]);
+
+    const handleAutoEnhance = useCallback(() => {
+        setFilters({ brightness: 1.1, contrast: 1.15, saturation: 1.1, shadow: 0 });
+    }, []);
+
+    const handleResetFilters = useCallback(() => {
+        setFilters({ brightness: 1, contrast: 1, saturation: 1, shadow: 0 });
+    }, []);
 
     const uploadImage = async (file: Blob) => {
         const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
@@ -551,7 +575,8 @@ const EditRequest: React.FC = () => {
                 frontCard,
                 backCard,
                 frontLogoDataUrl,
-                backLogoDataUrl
+                backLogoDataUrl,
+                filters
             );
 
             const url = URL.createObjectURL(zipBlob);
@@ -602,7 +627,8 @@ const EditRequest: React.FC = () => {
                 frontCard,
                 backCard,
                 frontLogoDataUrl,
-                backLogoDataUrl
+                backLogoDataUrl,
+                filters
             );
 
             const zipFileName = `zips/${employee.fullName.replace(/ /g, '_')}_ID_Card.zip`;
@@ -668,7 +694,8 @@ const EditRequest: React.FC = () => {
                 frontCard,
                 backCard,
                 frontLogoDataUrl,
-                backLogoDataUrl
+                backLogoDataUrl,
+                filters
             );
 
             const zipFileName = `zips/${employee.fullName.replace(/ /g, '_')}_ID_Card.zip`;
@@ -779,28 +806,7 @@ const EditRequest: React.FC = () => {
     return (
         <div className="min-h-screen bg-background">
             {/* Header */}
-            <AdminHeader setIsSidebarOpen={setSidebarOpen} activeTab="manage-requests" />
-
-            {isSidebarOpen && (
-                <div className="fixed inset-0 bg-gray-800 bg-opacity-50 z-40 lg:hidden" onClick={() => setSidebarOpen(false)}></div>
-            )}
-            <div className={`fixed top-0 left-0 h-full bg-white dark:bg-background-dark w-64 z-50 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-300 ease-in-out lg:hidden`}>
-                <div className="p-5 border-b border-gray-200 dark:border-gray-700">
-                    <button onClick={() => setSidebarOpen(false)}>
-                        <span className="material-symbols-outlined text-2xl">close</span>
-                    </button>
-                </div>
-                <nav className="flex flex-col p-5 gap-4">
-                    <a className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" href="/dashboard">Dashboard</a>
-                    <a className="text-primary text-sm font-medium leading-normal" href="/selection">New Batch</a>
-                    <a className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" href="/manage-requests">Manage Employees</a>
-                    <a className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" href="#">Settings</a>
-                    <button onClick={logout} className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal flex items-center gap-2">
-                        <span className="material-symbols-outlined text-xl">logout</span>
-                        Logout
-                    </button>
-                </nav>
-            </div>
+            <AppHeader />
 
             {/* Main Container */}
             <div className="max-w-[1150px] mx-auto p-3 grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -835,6 +841,24 @@ const EditRequest: React.FC = () => {
                             value={editor.scale}
                             onChange={(e) => setEditor(prev => ({ ...prev, scale: parseFloat(e.target.value) }))}
                             className="w-[150px]"
+                        />
+                    </div>
+
+                    {/* Image Adjustments */}
+                    <div className="mt-4 border-t border-gray-200 pt-3">
+                        <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Image Adjustments</p>
+                        <ImageAdjustments
+                            brightness={filters.brightness}
+                            contrast={filters.contrast}
+                            saturation={filters.saturation}
+                            shadow={filters.shadow}
+                            onBrightnessChange={(val) => setFilters(prev => ({ ...prev, brightness: val }))}
+                            onContrastChange={(val) => setFilters(prev => ({ ...prev, contrast: val }))}
+                            onSaturationChange={(val) => setFilters(prev => ({ ...prev, saturation: val }))}
+                            onShadowChange={(val) => setFilters(prev => ({ ...prev, shadow: val }))}
+                            onAutoEnhance={handleAutoEnhance}
+                            onResetFilters={handleResetFilters}
+                            hasImage={!!editor.img}
                         />
                     </div>
 

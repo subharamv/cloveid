@@ -1,17 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { Link } from 'react-router-dom';
-import logo from '../assets/CLOVE LOGO BLACK.png';
 import { useAuth } from '../hooks/useAuth';
 import { toast } from 'sonner';
-import AdminHeader from '../components/AdminHeader';
-import { Pencil, Trash2 } from 'lucide-react';
+import AppHeader from '../components/AppHeader';
+import {
+    Pencil, Trash2, Plus, X, Check, ChevronDown, ChevronRight, Building2,
+    Mail, MapPin, Eye, Search, RefreshCw, MoreHorizontal, Filter
+} from 'lucide-react';
 import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+
+const PAGE_SIZES = [10, 20, 50];
 
 interface Vendor {
     id: string;
@@ -38,11 +41,17 @@ const VendorManagement = () => {
     const [address, setAddress] = useState('');
     const [vendors, setVendors] = useState<Vendor[]>([]);
     const [vendorRequests, setVendorRequests] = useState<VendorRequest[]>([]);
-    const { user, logout } = useAuth();
-    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+    const { user } = useAuth();
     const [editingVendor, setEditingVendor] = useState<Vendor | null>(null);
     const [isSaving, setIsSaving] = useState(false);
     const [changingVendorRequest, setChangingVendorRequest] = useState<VendorRequest | null>(null);
+    const [showForm, setShowForm] = useState(false);
+    const [expandedVendorId, setExpandedVendorId] = useState<string | null>(null);
+
+    const [searchQuery, setSearchQuery] = useState('');
+    const [statusFilter, setStatusFilter] = useState('all');
+    const [page, setPage] = useState(1);
+    const [perPage, setPerPage] = useState(PAGE_SIZES[0]);
 
     useEffect(() => {
         fetchVendors();
@@ -87,14 +96,12 @@ const VendorManagement = () => {
         if (error) {
             toast.error(error.message);
         } else {
-            const formattedVendors = data.map((v: any) => {
-                return {
-                    id: v.id,
-                    name: v.name || v.profiles?.full_name || '',
-                    email: v.email || '',
-                    address: v.address || ''
-                };
-            });
+            const formattedVendors = data.map((v: any) => ({
+                id: v.id,
+                name: v.name || v.profiles?.full_name || '',
+                email: v.email || '',
+                address: v.address || ''
+            }));
             setVendors(formattedVendors);
         }
     };
@@ -102,7 +109,6 @@ const VendorManagement = () => {
     const handleAddVendor = async (e: React.FormEvent) => {
         e.preventDefault();
 
-        // Step 1: Create a new user in Supabase Auth
         const { data: authData, error: authError } = await supabase.auth.signUp({
             email,
             password,
@@ -120,7 +126,6 @@ const VendorManagement = () => {
         }
 
         if (authData.user) {
-            // Step 2: Insert vendor details into the 'vendors' table
             const { error: vendorError } = await supabase
                 .from('vendors')
                 .insert([
@@ -129,19 +134,16 @@ const VendorManagement = () => {
 
             if (vendorError) {
                 toast.error(vendorError.message);
-                // Optionally, delete the created user if vendor insertion fails
-                // await supabase.auth.api.deleteUser(authData.user.id);
                 return;
             }
 
-            // Step 3: Update the user's role in the 'profiles' table
             const { error: profileError } = await supabase
                 .from('profiles')
-                .upsert({ 
-                    id: authData.user.id, 
+                .upsert({
+                    id: authData.user.id,
                     role: 'vendor',
                     full_name: name,
-                    is_active: true 
+                    is_active: true
                 });
 
             if (profileError) {
@@ -154,7 +156,8 @@ const VendorManagement = () => {
             setEmail('');
             setPassword('');
             setAddress('');
-            fetchVendors(); // Refresh the vendor list
+            setShowForm(false);
+            fetchVendors();
         }
     };
 
@@ -166,10 +169,10 @@ const VendorManagement = () => {
         try {
             const { error: vendorError } = await supabase
                 .from('vendors')
-                .update({ 
-                    name: editingVendor.name, 
-                    email: editingVendor.email, 
-                    address: editingVendor.address 
+                .update({
+                    name: editingVendor.name,
+                    email: editingVendor.email,
+                    address: editingVendor.address
                 })
                 .eq('id', editingVendor.id);
 
@@ -177,8 +180,8 @@ const VendorManagement = () => {
 
             const { error: profileError } = await supabase
                 .from('profiles')
-                .update({ 
-                    full_name: editingVendor.name 
+                .update({
+                    full_name: editingVendor.name
                 })
                 .eq('id', editingVendor.id);
 
@@ -199,7 +202,6 @@ const VendorManagement = () => {
             return;
         }
 
-        // First, delete the vendor from the 'vendors' table
         const { error: vendorError } = await supabase
             .from('vendors')
             .delete()
@@ -210,12 +212,11 @@ const VendorManagement = () => {
             return;
         }
 
-        // Also delete the profile
         const { error: profileError } = await supabase
             .from('profiles')
             .delete()
             .eq('id', vendorId);
-        
+
         if (profileError) {
             console.error('Error deleting profile:', profileError);
             toast.error('Vendor record deleted, but profile deletion failed: ' + profileError.message);
@@ -223,7 +224,7 @@ const VendorManagement = () => {
             toast.success('Vendor and profile deleted successfully!');
         }
 
-        fetchVendors(); // Refresh the vendor list
+        fetchVendors();
     };
 
     const handleDeleteVendorRequest = async (id: number) => {
@@ -262,198 +263,471 @@ const VendorManagement = () => {
         }
     };
 
+    const StatusBadge = ({ status }: { status: string | null }) => {
+        const styles: Record<string, string> = {
+            completed: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
+            sent: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
+            accepted: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400',
+            rejected: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
+        };
+        return (
+            <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${styles[status || ''] || 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300'}`}>
+                {status || 'unknown'}
+            </span>
+        );
+    };
+
+    const filteredRequests = useMemo(() => {
+        let result = [...vendorRequests];
+        if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase();
+            result = result.filter(r =>
+                r.batch_id?.toLowerCase().includes(q) ||
+                r.vendor_name?.toLowerCase().includes(q) ||
+                r.status?.toLowerCase().includes(q)
+            );
+        }
+        if (statusFilter !== 'all') {
+            result = result.filter(r => r.status === statusFilter);
+        }
+        return result;
+    }, [vendorRequests, searchQuery, statusFilter]);
+
+    const totalPages = Math.max(1, Math.ceil(filteredRequests.length / perPage));
+    const safePage = Math.min(page, totalPages);
+    const paginatedRequests = filteredRequests.slice((safePage - 1) * perPage, safePage * perPage);
+
+    useEffect(() => {
+        if (page > totalPages) setPage(totalPages);
+    }, [page, totalPages]);
+
     return (
-        <div className="relative flex h-auto min-h-screen w-full flex-col bg-background-light dark:bg-background-dark">
-            <div className="layout-container flex h-full grow flex-col">
-                <AdminHeader setIsSidebarOpen={setIsSidebarOpen} activeTab="settings" />
-                <main className="flex-1 px-4 py-8 sm:px-6 lg:px-10">
-                    <div className="p-4 sm:p-8">
-                        <h1 className="text-2xl font-bold mb-4">Create Vendor Credentials</h1>
-                        <div className="mb-8">
-                            <form onSubmit={handleAddVendor} className="flex flex-col gap-4 w-full max-w-md">
-                                <input
-                                    type="text"
-                                    placeholder="Vendor Name"
-                                    value={name}
-                                    onChange={(e) => setName(e.target.value)}
-                                    className="border p-2 rounded"
-                                    required
-                                />
-                                <input
-                                    type="email"
-                                    placeholder="Vendor Email"
-                                    value={email}
-                                    onChange={(e) => setEmail(e.target.value)}
-                                    className="border p-2 rounded"
-                                    required
-                                />
-                                <input
-                                    type="password"
-                                    placeholder="Password"
-                                    value={password}
-                                    onChange={(e) => setPassword(e.target.value)}
-                                    className="border p-2 rounded"
-                                    required
-                                />
-                                <textarea
-                                    placeholder="Address"
-                                    value={address}
-                                    onChange={(e) => setAddress(e.target.value)}
-                                    className="border p-2 rounded"
-                                    required
-                                />
-                                <button type="submit" className="bg-blue-500 text-white p-2 rounded">
-                                    Create Vendor
-                                </button>
+        <div className="min-h-screen bg-background">
+            <AppHeader />
+            <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 lg:py-10">
+                {/* Header */}
+                <div className="flex items-center justify-between mb-8">
+                    <div>
+                        <h1 className="text-2xl lg:text-3xl font-bold text-foreground">Vendor Management</h1>
+                        <p className="text-sm text-muted-foreground mt-1">Create and manage vendor credentials and requests</p>
+                    </div>
+                    <button
+                        onClick={() => setShowForm(!showForm)}
+                        className="flex items-center gap-2 px-4 py-2.5 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors text-sm font-medium shadow-sm"
+                    >
+                        {showForm ? <X size={18} /> : <Plus size={18} />}
+                        {showForm ? 'Close' : 'New Vendor'}
+                    </button>
+                </div>
+
+                {/* Create Vendor Form */}
+                {showForm && (
+                    <div className="mb-8 bg-white dark:bg-background-dark rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden">
+                        <div className="p-5 sm:p-6">
+                            <h2 className="text-lg font-semibold mb-5 flex items-center gap-2">
+                                <Building2 size={20} className="text-primary" />
+                                Create Vendor Credentials
+                            </h2>
+                            <form onSubmit={handleAddVendor} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div className="sm:col-span-2">
+                                    <label className="block text-sm font-medium text-muted-foreground mb-1.5">Vendor Name</label>
+                                    <input
+                                        type="text"
+                                        placeholder="Enter vendor name"
+                                        value={name}
+                                        onChange={(e) => setName(e.target.value)}
+                                        className="w-full px-4 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-foreground text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
+                                        required
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-muted-foreground mb-1.5">Email</label>
+                                    <input
+                                        type="email"
+                                        placeholder="vendor@example.com"
+                                        value={email}
+                                        onChange={(e) => setEmail(e.target.value)}
+                                        className="w-full px-4 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-foreground text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
+                                        required
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-muted-foreground mb-1.5">Password</label>
+                                    <input
+                                        type="password"
+                                        placeholder="Set a password"
+                                        value={password}
+                                        onChange={(e) => setPassword(e.target.value)}
+                                        className="w-full px-4 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-foreground text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
+                                        required
+                                    />
+                                </div>
+                                <div className="sm:col-span-2">
+                                    <label className="block text-sm font-medium text-muted-foreground mb-1.5">Address</label>
+                                    <textarea
+                                        placeholder="Enter vendor address"
+                                        value={address}
+                                        onChange={(e) => setAddress(e.target.value)}
+                                        rows={3}
+                                        className="w-full px-4 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-foreground text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all resize-none"
+                                        required
+                                    />
+                                </div>
+                                <div className="sm:col-span-2 flex justify-end">
+                                    <button
+                                        type="submit"
+                                        className="flex items-center gap-2 px-6 py-2.5 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors text-sm font-medium shadow-sm"
+                                    >
+                                        <Plus size={18} />
+                                        Create Vendor
+                                    </button>
+                                </div>
                             </form>
                         </div>
+                    </div>
+                )}
 
-                        <h2 className="text-xl font-bold mb-4">Vendor List</h2>
-                        <div className="overflow-x-auto">
-                            <table className="min-w-full bg-white dark:bg-gray-800">
-                                <thead>
-                                    <tr>
-                                        <th className="py-2 px-4 border-b text-left">Name</th>
-                                        <th className="py-2 px-4 border-b text-left">Email</th>
-                                        <th className="py-2 px-4 border-b text-left">Address</th>
-                                        <th className="py-2 px-4 border-b text-left">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {vendors.map((vendor) => (
-                                        <tr key={vendor.id}>
-                                            <td className="py-2 px-4 border-b">{vendor.name}</td>
-                                            <td className="py-2 px-4 border-b">{vendor.email}</td>
-                                            <td className="py-2 px-4 border-b">{vendor.address}</td>
-                                            <td className="py-2 px-4 border-b text-left">
-                                                <div className="flex gap-2">
-                                                    <button
-                                                        onClick={() => setEditingVendor(vendor)}
-                                                        className="p-2 text-yellow-600 hover:bg-yellow-50 dark:hover:bg-yellow-900/20 rounded-lg transition-colors"
-                                                        title="Edit"
-                                                    >
-                                                        <Pencil size={18} />
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleDeleteVendor(vendor.id)}
-                                                        className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                                                        title="Delete"
-                                                    >
-                                                        <Trash2 size={18} />
-                                                    </button>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                {/* Vendor List (Collapsible Accordion) */}
+                <div className="mb-8 bg-white dark:bg-background-dark rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden">
+                    <div className="p-5 sm:p-6 border-b border-gray-100 dark:border-gray-800">
+                        <h2 className="text-lg font-semibold flex items-center gap-2">
+                            <Building2 size={20} className="text-primary" />
+                            Vendor Accounts
+                            <span className="text-sm font-normal text-muted-foreground ml-1">({vendors.length})</span>
+                        </h2>
+                    </div>
+
+                    {vendors.length === 0 ? (
+                        <div className="py-12 text-center text-sm text-muted-foreground">
+                            No vendors yet. Create your first vendor above.
                         </div>
+                    ) : (
+                        <div className="divide-y divide-gray-100 dark:divide-gray-800">
+                            {vendors.map((vendor) => (
+                                <div key={vendor.id}>
+                                    <button
+                                        onClick={() => setExpandedVendorId(expandedVendorId === vendor.id ? null : vendor.id)}
+                                        className="w-full flex items-center justify-between px-5 py-4 hover:bg-gray-50 dark:hover:bg-gray-900/30 transition-colors text-left"
+                                    >
+                                        <div className="flex items-center gap-3 min-w-0">
+                                            <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center text-sm font-bold">
+                                                {vendor.name.charAt(0).toUpperCase()}
+                                            </div>
+                                            <div className="min-w-0">
+                                                <p className="text-sm font-medium text-foreground truncate">{vendor.name}</p>
+                                                <p className="text-xs text-muted-foreground truncate">{vendor.email}</p>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); setEditingVendor(vendor); }}
+                                                className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                                                title="Edit vendor"
+                                            >
+                                                <Pencil size={14} />
+                                            </button>
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); handleDeleteVendor(vendor.id); }}
+                                                className="p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                                title="Delete vendor"
+                                            >
+                                                <Trash2 size={14} />
+                                            </button>
+                                            {expandedVendorId === vendor.id ? (
+                                                <ChevronDown size={18} className="text-muted-foreground shrink-0" />
+                                            ) : (
+                                                <ChevronRight size={18} className="text-muted-foreground shrink-0" />
+                                            )}
+                                        </div>
+                                    </button>
 
-                        <h2 className="text-xl font-bold mt-12 mb-4">Vendor Requests</h2>
-                        <div className="overflow-x-auto">
-                            <table className="min-w-full bg-white dark:bg-gray-800">
-                                <thead>
-                                    <tr>
-                                        <th className="py-2 px-4 border-b text-left">Batch ID</th>
-                                        <th className="py-2 px-4 border-b text-left">Vendor</th>
-                                        <th className="py-2 px-4 border-b text-left">Status</th>
-                                        <th className="py-2 px-4 border-b text-left">Created At</th>
-                                        <th className="py-2 px-4 border-b text-left">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {vendorRequests.map((request) => (
-                                        <tr key={request.id}>
-                                            <td className="py-2 px-4 border-b">{request.batch_id || 'N/A'}</td>
-                                            <td className="py-2 px-4 border-b">{request.vendor_name}</td>
-                                            <td className="py-2 px-4 border-b">
-                                                <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                                                    request.status === 'completed' ? 'bg-green-100 text-green-800' :
-                                                    request.status === 'sent' ? 'bg-blue-100 text-blue-800' :
-                                                    'bg-gray-100 text-gray-800'
-                                                }`}>
-                                                    {request.status}
-                                                </span>
-                                            </td>
-                                            <td className="py-2 px-4 border-b">{new Date(request.created_at).toLocaleDateString()}</td>
-                                            <td className="py-2 px-4 border-b text-left">
-                                                <div className="flex gap-2">
-                                                    <button
-                                                        onClick={() => setChangingVendorRequest(request)}
-                                                        className="text-blue-600 hover:underline text-sm"
-                                                    >
-                                                        Change Vendor
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleDeleteVendorRequest(request.id)}
-                                                        className="text-red-600 hover:underline text-sm"
-                                                    >
-                                                        Delete
-                                                    </button>
+                                    {expandedVendorId === vendor.id && (
+                                        <div className="px-5 pb-4 pt-2 bg-gray-50/50 dark:bg-gray-900/20">
+                                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+                                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                                    <Mail size={14} className="shrink-0" />
+                                                    <span className="truncate">{vendor.email}</span>
                                                 </div>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                    {vendorRequests.length === 0 && (
-                                        <tr>
-                                            <td colSpan={5} className="py-4 text-center text-gray-500">No vendor requests found</td>
-                                        </tr>
+                                                <div className="flex items-start gap-2 text-sm text-muted-foreground sm:col-span-2">
+                                                    <MapPin size={14} className="shrink-0 mt-0.5" />
+                                                    <span>{vendor.address || 'No address'}</span>
+                                                </div>
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <button
+                                                    onClick={() => setEditingVendor(vendor)}
+                                                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 dark:bg-blue-900/20 dark:text-blue-400 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
+                                                >
+                                                    <Pencil size={12} />
+                                                    Edit
+                                                </button>
+                                                <button
+                                                    onClick={() => handleDeleteVendor(vendor.id)}
+                                                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 dark:bg-red-900/20 dark:text-red-400 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors"
+                                                >
+                                                    <Trash2 size={12} />
+                                                    Delete
+                                                </button>
+                                            </div>
+                                        </div>
                                     )}
-                                </tbody>
-                            </table>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                {/* Vendor Requests */}
+                <div className="bg-white dark:bg-background-dark rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden">
+                    <div className="p-5 sm:p-6 border-b border-gray-100 dark:border-gray-800">
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                            <h2 className="text-lg font-semibold flex items-center gap-2">
+                                <Eye size={20} className="text-primary" />
+                                Vendor Requests
+                                <span className="text-sm font-normal text-muted-foreground ml-1">
+                                    ({filteredRequests.length})
+                                    {vendorRequests.length !== filteredRequests.length && (
+                                        <span className="text-xs ml-1">filtered from {vendorRequests.length}</span>
+                                    )}
+                                </span>
+                            </h2>
+
+                            <div className="flex flex-col sm:flex-row gap-3">
+                                <div className="relative">
+                                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                                    <input
+                                        type="text"
+                                        placeholder="Search by batch, vendor, status..."
+                                        value={searchQuery}
+                                        onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
+                                        className="w-full sm:w-56 pl-9 pr-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-foreground placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
+                                    />
+                                </div>
+                                <div className="relative">
+                                    <Filter size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                                    <select
+                                        value={statusFilter}
+                                        onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+                                        className="w-full sm:w-40 pl-9 pr-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all appearance-none"
+                                    >
+                                        <option value="all">All Statuses</option>
+                                        <option value="sent">Sent</option>
+                                        <option value="accepted">Accepted</option>
+                                        <option value="rejected">Rejected</option>
+                                        <option value="completed">Completed</option>
+                                    </select>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                </main>
-            </div>
 
+                    {/* Desktop Table */}
+                    <div className="hidden sm:block overflow-x-auto">
+                        <table className="w-full">
+                            <thead>
+                                <tr className="bg-gray-50 dark:bg-gray-900/50">
+                                    <th className="py-3.5 px-5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Batch ID</th>
+                                    <th className="py-3.5 px-5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Vendor</th>
+                                    <th className="py-3.5 px-5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Status</th>
+                                    <th className="py-3.5 px-5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Created</th>
+                                    <th className="py-3.5 px-5 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                                {paginatedRequests.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={5} className="py-12 text-center text-sm text-muted-foreground">
+                                            {searchQuery || statusFilter !== 'all' ? 'No requests match your filters.' : 'No vendor requests found.'}
+                                        </td>
+                                    </tr>
+                                ) : paginatedRequests.map((request) => (
+                                    <tr key={request.id} className="hover:bg-gray-50 dark:hover:bg-gray-900/30 transition-colors">
+                                        <td className="py-4 px-5 text-sm font-mono text-foreground">{request.batch_id || 'N/A'}</td>
+                                        <td className="py-4 px-5 text-sm text-foreground">{request.vendor_name}</td>
+                                        <td className="py-4 px-5">
+                                            <StatusBadge status={request.status} />
+                                        </td>
+                                        <td className="py-4 px-5 text-sm text-muted-foreground">{new Date(request.created_at).toLocaleDateString()}</td>
+                                        <td className="py-4 px-5 text-right">
+                                            <div className="flex items-center justify-end gap-1">
+                                                <button
+                                                    onClick={() => setChangingVendorRequest(request)}
+                                                    className="p-2 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                                                    title="Change vendor"
+                                                >
+                                                    <RefreshCw size={15} />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleDeleteVendorRequest(request.id)}
+                                                    className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                                    title="Delete request"
+                                                >
+                                                    <Trash2 size={15} />
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {/* Mobile Cards */}
+                    <div className="sm:hidden divide-y divide-gray-100 dark:divide-gray-800">
+                        {paginatedRequests.length === 0 ? (
+                            <div className="py-12 text-center text-sm text-muted-foreground">
+                                {searchQuery || statusFilter !== 'all' ? 'No requests match your filters.' : 'No vendor requests found.'}
+                            </div>
+                        ) : paginatedRequests.map((request) => (
+                            <div key={request.id} className="p-4 space-y-2">
+                                <div className="flex items-start justify-between">
+                                    <div className="min-w-0">
+                                        <p className="text-xs font-mono text-muted-foreground">Batch: {request.batch_id || 'N/A'}</p>
+                                        <p className="text-sm font-medium text-foreground mt-0.5 truncate">{request.vendor_name}</p>
+                                    </div>
+                                    <StatusBadge status={request.status} />
+                                </div>
+                                <p className="text-xs text-muted-foreground">Created: {new Date(request.created_at).toLocaleDateString()}</p>
+                                <div className="flex gap-2 pt-1">
+                                    <button
+                                        onClick={() => setChangingVendorRequest(request)}
+                                        className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 dark:bg-blue-900/20 dark:text-blue-400 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
+                                    >
+                                        <RefreshCw size={12} />
+                                        Change
+                                    </button>
+                                    <button
+                                        onClick={() => handleDeleteVendorRequest(request.id)}
+                                        className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-red-600 bg-red-50 dark:bg-red-900/20 dark:text-red-400 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors"
+                                    >
+                                        <Trash2 size={12} />
+                                        Delete
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Pagination */}
+                    {filteredRequests.length > 0 && (
+                        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-5 py-4 border-t border-gray-100 dark:border-gray-800">
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                <span>Rows per page:</span>
+                                <select
+                                    value={perPage}
+                                    onChange={(e) => { setPerPage(Number(e.target.value)); setPage(1); }}
+                                    className="py-1 px-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                                >
+                                    {PAGE_SIZES.map(size => (
+                                        <option key={size} value={size}>{size}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => setPage(1)}
+                                    disabled={safePage === 1}
+                                    className="px-2 py-1 text-sm text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                >
+                                    {'<<'}
+                                </button>
+                                <button
+                                    onClick={() => setPage(safePage - 1)}
+                                    disabled={safePage === 1}
+                                    className="px-2 py-1 text-sm text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                >
+                                    {'<'}
+                                </button>
+                                <span className="px-3 py-1 text-sm text-foreground font-medium">
+                                    Page {safePage} of {totalPages}
+                                </span>
+                                <button
+                                    onClick={() => setPage(safePage + 1)}
+                                    disabled={safePage === totalPages}
+                                    className="px-2 py-1 text-sm text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                >
+                                    {'>'}
+                                </button>
+                                <button
+                                    onClick={() => setPage(totalPages)}
+                                    disabled={safePage === totalPages}
+                                    className="px-2 py-1 text-sm text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                >
+                                    {'>>'}
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </main>
+
+            {/* Edit Vendor Modal */}
             {editingVendor && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-                    <div className="bg-white dark:bg-gray-800 rounded-xl max-w-lg w-full p-6 shadow-xl">
-                        <h2 className="text-xl font-bold mb-4">Edit Vendor</h2>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setEditingVendor(null)}>
+                    <div className="bg-white dark:bg-gray-900 rounded-xl max-w-lg w-full p-6 shadow-xl border border-gray-200 dark:border-gray-700" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-between mb-5">
+                            <h2 className="text-lg font-semibold flex items-center gap-2">
+                                <Pencil size={18} className="text-primary" />
+                                Edit Vendor
+                            </h2>
+                            <button onClick={() => setEditingVendor(null)} className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors">
+                                <X size={18} />
+                            </button>
+                        </div>
                         <form onSubmit={handleUpdateVendor} className="space-y-4">
                             <div>
-                                <label className="text-sm font-medium mb-1 block">Vendor Name</label>
-                                <input 
-                                    type="text" 
+                                <label className="block text-sm font-medium text-muted-foreground mb-1.5">Vendor Name</label>
+                                <input
+                                    type="text"
                                     value={editingVendor.name}
                                     onChange={(e) => setEditingVendor({...editingVendor, name: e.target.value})}
-                                    className="w-full px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900"
+                                    className="w-full px-4 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-foreground text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
                                     required
                                 />
                             </div>
                             <div>
-                                <label className="text-sm font-medium mb-1 block">Email</label>
-                                <input 
-                                    type="email" 
+                                <label className="block text-sm font-medium text-muted-foreground mb-1.5">Email</label>
+                                <input
+                                    type="email"
                                     value={editingVendor.email}
                                     onChange={(e) => setEditingVendor({...editingVendor, email: e.target.value})}
-                                    className="w-full px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900"
+                                    className="w-full px-4 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-foreground text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
                                     required
                                 />
                             </div>
                             <div>
-                                <label className="text-sm font-medium mb-1 block">Address</label>
-                                <textarea 
+                                <label className="block text-sm font-medium text-muted-foreground mb-1.5">Address</label>
+                                <textarea
                                     value={editingVendor.address}
                                     onChange={(e) => setEditingVendor({...editingVendor, address: e.target.value})}
-                                    className="w-full px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 min-h-[80px]"
+                                    rows={3}
+                                    className="w-full px-4 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-foreground text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all resize-none"
                                     required
                                 />
                             </div>
-                            <div className="flex gap-3 mt-6">
-                                <button 
+                            <div className="flex gap-3 pt-2">
+                                <button
                                     type="button"
                                     onClick={() => setEditingVendor(null)}
-                                    className="flex-1 px-4 py-2 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors"
+                                    className="flex-1 px-4 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg text-sm font-medium text-foreground hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
                                 >
                                     Cancel
                                 </button>
-                                <button 
+                                <button
                                     type="submit"
                                     disabled={isSaving}
-                                    className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50 flex items-center justify-center"
+                                    className="flex-1 px-4 py-2.5 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2 shadow-sm"
                                 >
-                                    {isSaving ? <span className="animate-spin mr-2 material-symbols-outlined">sync</span> : 'Save Changes'}
+                                    {isSaving ? (
+                                        <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                        </svg>
+                                    ) : (
+                                        <Check size={16} />
+                                    )}
+                                    {isSaving ? 'Saving...' : 'Save Changes'}
                                 </button>
                             </div>
                         </form>
@@ -461,16 +735,23 @@ const VendorManagement = () => {
                 </div>
             )}
 
+            {/* Change Vendor Modal */}
             {changingVendorRequest && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-                    <div className="bg-white dark:bg-gray-800 rounded-xl max-w-md w-full p-6 shadow-xl">
-                        <h2 className="text-xl font-bold mb-4">Change Vendor for Request</h2>
-                        <p className="text-sm text-gray-500 mb-4">Batch ID: {changingVendorRequest.batch_id}</p>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setChangingVendorRequest(null)}>
+                    <div className="bg-white dark:bg-gray-900 rounded-xl max-w-md w-full p-6 shadow-xl border border-gray-200 dark:border-gray-700" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-between mb-5">
+                            <h2 className="text-lg font-semibold">Change Vendor</h2>
+                            <button onClick={() => setChangingVendorRequest(null)} className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors">
+                                <X size={18} />
+                            </button>
+                        </div>
+                        <p className="text-sm text-muted-foreground mb-1">Batch ID: <span className="font-mono font-medium text-foreground">{changingVendorRequest.batch_id}</span></p>
+                        <p className="text-xs text-muted-foreground mb-4">Select a new vendor to assign this request to.</p>
                         <div className="space-y-4">
                             <div>
-                                <label className="text-sm font-medium mb-1 block">Select New Vendor</label>
-                                <select 
-                                    className="w-full px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900"
+                                <label className="block text-sm font-medium text-muted-foreground mb-1.5">Select New Vendor</label>
+                                <select
+                                    className="w-full px-4 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-foreground text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
                                     onChange={(e) => {
                                         if (e.target.value) {
                                             handleChangeVendor(changingVendorRequest.id, e.target.value);
@@ -484,11 +765,11 @@ const VendorManagement = () => {
                                     ))}
                                 </select>
                             </div>
-                            <div className="flex gap-3 mt-6">
-                                <button 
+                            <div className="flex gap-3 pt-2">
+                                <button
                                     type="button"
                                     onClick={() => setChangingVendorRequest(null)}
-                                    className="flex-1 px-4 py-2 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors"
+                                    className="flex-1 px-4 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg text-sm font-medium text-foreground hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
                                 >
                                     Cancel
                                 </button>
@@ -497,28 +778,6 @@ const VendorManagement = () => {
                     </div>
                 </div>
             )}
-
-            {isSidebarOpen && (
-                <div className="fixed inset-0 bg-gray-800 bg-opacity-50 z-40 lg:hidden" onClick={() => setIsSidebarOpen(false)}></div>
-            )}
-            <div className={`fixed top-0 left-0 h-full bg-white dark:bg-background-dark w-64 z-50 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-300 ease-in-out lg:hidden`}>
-                <div className="p-5 border-b border-gray-200 dark:border-gray-700">
-                    <button onClick={() => setIsSidebarOpen(false)}>
-                        <span className="material-symbols-outlined text-2xl">close</span>
-                    </button>
-                </div>
-                <nav className="flex flex-col p-5 gap-4">
-                    <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="/dashboard">Dashboard</Link>
-                    <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="/selection">New Batch</Link>
-                    <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="/manage-requests">Manage Employees</Link>
-                    <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="/vendor">Vendor Management</Link>
-                    <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="/user-management">User Management</Link>
-                    <button onClick={logout} className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-600 text-sm font-medium leading-normal flex items-center gap-2">
-                        <span className="material-symbols-outlined">logout</span>
-                        Logout
-                    </button>
-                </nav>
-            </div>
         </div>
     );
 };

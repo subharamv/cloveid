@@ -2,17 +2,15 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Employee } from '@/types/employee';
 import { EmployeeForm } from '@/components/EmployeeForm';
-import { PhotoUpload } from '@/components/PhotoUpload';
 import { IDCardFront } from '@/components/IDCardFront';
 import { IDCardBack } from '@/components/IDCardBack';
-import { Modal } from '@/components/Modal';
-import { ActionButtons } from '@/components/ActionButtons';
 import { useDownloadZip } from '@/hooks/useDownloadZip';
 
 import { toast } from 'sonner';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabaseClient';
-import { useAuth } from '@/hooks/useAuth';
+import AppHeader from '@/components/AppHeader';
+import { CloudUpload, Check, Edit2, ZoomOut, ZoomIn, RotateCcw, RotateCw, RefreshCw, Hourglass, ShieldCheck, Printer, Store } from 'lucide-react';
 
 
 import logo from '@/assets/CLOVE LOGO BLACK.png';
@@ -31,9 +29,6 @@ import '@/styles/EmployeePage.css';
 const EmployeePage: React.FC = () => {
     const { downloadZip } = useDownloadZip();
     const navigate = useNavigate();
-    const { logout, clearSession } = useAuth();
-    const [isSidebarOpen, setSidebarOpen] = useState(false);
-
     const [frontLogoDataUrl, setFrontLogoDataUrl] = useState<string>('');
     const [backLogoDataUrl, setBackLogoDataUrl] = useState<string>('');
     const [isCardFlipped, setCardFlipped] = useState(false);
@@ -52,6 +47,7 @@ const EmployeePage: React.FC = () => {
     });
 
     const [showUploadNote, setShowUploadNote] = useState(true);
+    const [isDraggingPhoto, setIsDraggingPhoto] = useState(false);
     const [modal, setModal] = useState({ isOpen: false, type: 'error' as 'error' | 'success', title: '', message: '' });
 
     // editor state holds the HTMLImageElement and transform params
@@ -131,8 +127,6 @@ const EmployeePage: React.FC = () => {
     const handleHideUploadNote = useCallback(() => {
         setShowUploadNote(false);
     }, []);
-
-
 
     const handlePhotoSelect = useCallback(async (file: File) => {
         const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
@@ -232,6 +226,26 @@ const EmployeePage: React.FC = () => {
             img.src = imageUrl;
         });
     }, [setEditor, setEmployee]);
+
+    const handleDragOver = useCallback((e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDraggingPhoto(true);
+    }, []);
+
+    const handleDragLeave = useCallback((e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDraggingPhoto(false);
+    }, []);
+
+    const handleDrop = useCallback((e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDraggingPhoto(false);
+        const file = e.dataTransfer.files[0];
+        if (file) handlePhotoSelect(file);
+    }, [handlePhotoSelect]);
 
     // drawEditor: paints the editor.img into the visible canvas sized to photoBoxRef
     const drawEditor = useCallback(() => {
@@ -631,30 +645,7 @@ const EmployeePage: React.FC = () => {
         <div className="font-display bg-background-light dark:bg-background-dark">
             <div className="relative flex h-auto min-h-screen w-full flex-col group/design-root overflow-x-hidden">
                 <div className="layout-container flex h-full grow flex-col">
-                    <header className="flex items-center justify-between whitespace-nowrap border-b border-solid border-b-gray-200 dark:border-b-gray-700 px-4 py-3 bg-white dark:bg-gray-800 shadow-md">
-                        <div className="flex items-center gap-4 text-gray-900 dark:text-white">
-                            <button className="lg:hidden" onClick={() => setSidebarOpen(true)}>
-                                <span className="material-symbols-outlined text-2xl">menu</span>
-                            </button>
-                            <img src={logo} alt="Logo" className="h-8 w-auto" />
-                        </div>
-                        <div className="hidden lg:flex flex-1 justify-center gap-8">
-                            <div className="flex items-center gap-9">
-                                <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="/user-dashboard">Dashboard</Link>
-                                <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="/employee-page">Raise New Card</Link>
-                                <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="/user-dashboard">Settings</Link>
-                            </div>
-                        </div>
-                        <div className="flex items-center justify-end gap-4">
-                            <button className="flex max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-full h-10 w-10 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">
-                                <span className="material-symbols-outlined text-xl">notifications</span>
-                            </button>
-                            <div className="bg-center bg-no-repeat aspect-square bg-cover rounded-full size-10" data-alt="User avatar image" style={{ backgroundImage: 'url("https://lh3.googleusercontent.com/aida-public/AB6AXuDTuk1Iosn49fHWfKjAP9fBJw3pQzsM6YL5zr-Cxka0K6IIkmxhTiisNLHxHNnJ9KANzspNqOKesKX_0x9HyVIotvJDUojrFn2AWhrITYpZtN0xi9T7ugql-9wNJQnqPuWDUZnZIbtnSxLe2Onfl1FMn0BF4vM61YkMxGtaPP6Gq-SqEPQfugyzpPDy7QoNGts7_1Abd7NSO-7z37gh5XlZ1BW6zV02LVXWhiY9TQDiVZOFWYhWBBRvJEJZ7Ys0spYA1NDiqcHthFzB")' }}></div>
-                            <button onClick={logout} className="flex max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-full h-10 w-10 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">
-                                <span className="material-symbols-outlined text-xl">logout</span>
-                            </button>
-                        </div>
-                    </header>
+                    <AppHeader />
                     <main className="flex-1 px-4 sm:px-6 lg:px-10 py-8">
                         <div className="max-w-7xl mx-auto">
                             <div className="flex flex-wrap justify-between gap-4 mb-8">
@@ -670,9 +661,18 @@ const EmployeePage: React.FC = () => {
                                     <div className="col-span-2">
                                         <p className="text-slate-900 dark:text-slate-200 text-sm font-medium leading-normal pb-2">Profile Image</p>
                                         <div className="flex items-center justify-center w-full">
-                                            <label className="flex flex-col items-center justify-center w-full h-40 border-2 border-slate-300 dark:border-slate-700 border-dashed rounded-lg cursor-pointer bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800">
+                                            <label
+                                                onDragOver={handleDragOver}
+                                                onDragLeave={handleDragLeave}
+                                                onDrop={handleDrop}
+                                                className={`flex flex-col items-center justify-center w-full h-40 border-2 border-dashed rounded-lg cursor-pointer bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors ${
+                                                    isDraggingPhoto
+                                                        ? 'border-orange-400 bg-orange-50 dark:bg-orange-900/20'
+                                                        : 'border-slate-300 dark:border-slate-700'
+                                                }`}
+                                            >
                                                 <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                                                    <span className="material-symbols-outlined text-4xl text-slate-500 dark:text-slate-400">cloud_upload</span>
+                                                    <CloudUpload size={36} className="text-slate-500 dark:text-slate-400 mb-2" />
                                                     <p className="mb-2 text-sm text-slate-500 dark:text-slate-400"><span className="font-semibold">Click to upload</span> or drag and drop</p>
                                                     <p className="text-xs text-slate-500 dark:text-slate-400">JPG or PNG (MAX. 2MB)</p>
                                                 </div>
@@ -687,17 +687,17 @@ const EmployeePage: React.FC = () => {
                                         <div className="flex justify-between items-center mb-2">
                                             <h2 className="text-slate-900 dark:text-white text-[22px] font-bold leading-tight tracking-[-0.015em]">Live Preview</h2>
                                             <button onClick={() => setIsEditingPhoto(!isEditingPhoto)} className="flex items-center justify-center rounded-lg h-10 px-4 bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-white text-sm font-bold">
-                                                {isEditingPhoto ? <span className="material-symbols-outlined">check</span> : <span className="material-symbols-outlined">edit</span>}
+                                                {isEditingPhoto ? <Check size={20} /> : <Edit2 size={20} />}
                                             </button>
                                         </div>
                                         <p className="text-slate-500 dark:text-slate-400 text-xs font-normal leading-normal mb-4">Click the card to see the back</p>
                                         {isEditingPhoto && (
                                             <div className="flex justify-center items-center gap-2 my-4">
-                                                <button onClick={handleZoomOut} className="p-2 rounded-full bg-slate-200 dark:bg-slate-700"><span className="material-symbols-outlined">zoom_out</span></button>
-                                                <button onClick={handleZoomIn} className="p-2 rounded-full bg-slate-200 dark:bg-slate-700"><span className="material-symbols-outlined">zoom_in</span></button>
-                                                <button onClick={handleRotateLeft} className="p-2 rounded-full bg-slate-200 dark:bg-slate-700"><span className="material-symbols-outlined">rotate_left</span></button>
-                                                <button onClick={handleRotateRight} className="p-2 rounded-full bg-slate-200 dark:bg-slate-700"><span className="material-symbols-outlined">rotate_right</span></button>
-                                                <button onClick={handleResetPos} className="p-2 rounded-full bg-slate-200 dark:bg-slate-700"><span className="material-symbols-outlined">refresh</span></button>
+                                                <button onClick={handleZoomOut} className="p-2 rounded-full bg-slate-200 dark:bg-slate-700"><ZoomOut size={18} /></button>
+                                                <button onClick={handleZoomIn} className="p-2 rounded-full bg-slate-200 dark:bg-slate-700"><ZoomIn size={18} /></button>
+                                                <button onClick={handleRotateLeft} className="p-2 rounded-full bg-slate-200 dark:bg-slate-700"><RotateCcw size={18} /></button>
+                                                <button onClick={handleRotateRight} className="p-2 rounded-full bg-slate-200 dark:bg-slate-700"><RotateCw size={18} /></button>
+                                                <button onClick={handleResetPos} className="p-2 rounded-full bg-slate-200 dark:bg-slate-700"><RefreshCw size={18} /></button>
                                             </div>
                                         )}
 
@@ -724,33 +724,33 @@ const EmployeePage: React.FC = () => {
                                         <ol className="relative border-l border-slate-200 dark:border-slate-700 space-y-8">
                                             <li className="ml-6">
                                                 <span className="absolute flex items-center justify-center w-6 h-6 bg-green-100 dark:bg-green-900 rounded-full -left-3 ring-8 ring-white dark:ring-slate-900/50">
-                                                    <span className="material-symbols-outlined text-sm text-green-600 dark:text-green-400">check</span>
+                                                    <Check size={14} className="text-green-600 dark:text-green-400" />
                                                 </span>
                                                 <h3 className="flex items-center mb-1 text-base font-semibold text-slate-900 dark:text-white">Submitted</h3>
                                                 <time className="block mb-2 text-sm font-normal leading-none text-slate-400 dark:text-slate-500">October 25th, 2023</time>
                                             </li>
                                             <li className="ml-6">
                                                 <span className="absolute flex items-center justify-center w-6 h-6 bg-yellow-100 dark:bg-yellow-900 rounded-full -left-3 ring-8 ring-white dark:ring-slate-900/50">
-                                                    <span className="material-symbols-outlined text-sm text-yellow-600 dark:text-yellow-400">hourglass_top</span>
+                                                    <Hourglass size={14} className="text-yellow-600 dark:text-yellow-400" />
                                                 </span>
                                                 <h3 className="mb-1 text-base font-semibold text-slate-900 dark:text-white">In Review</h3>
                                                 <time className="block mb-2 text-sm font-normal leading-none text-slate-400 dark:text-slate-500">Pending HR Approval</time>
                                             </li>
                                             <li className="ml-6">
                                                 <span className="absolute flex items-center justify-center w-6 h-6 bg-slate-100 dark:bg-slate-700 rounded-full -left-3 ring-8 ring-white dark:ring-slate-900/50">
-                                                    <span className="material-symbols-outlined text-sm text-slate-500 dark:text-slate-400">verified</span>
+                                                    <ShieldCheck size={14} className="text-slate-500 dark:text-slate-400" />
                                                 </span>
                                                 <h3 className="mb-1 text-base font-semibold text-slate-500 dark:text-slate-400">Approved</h3>
                                             </li>
                                             <li className="ml-6">
                                                 <span className="absolute flex items-center justify-center w-6 h-6 bg-slate-100 dark:bg-slate-700 rounded-full -left-3 ring-8 ring-white dark:ring-slate-900/50">
-                                                    <span className="material-symbols-outlined text-sm text-slate-500 dark:text-slate-400">print</span>
+                                                    <Printer size={14} className="text-slate-500 dark:text-slate-400" />
                                                 </span>
                                                 <h3 className="mb-1 text-base font-semibold text-slate-500 dark:text-slate-400">Printed</h3>
                                             </li>
                                             <li className="ml-6">
                                                 <span className="absolute flex items-center justify-center w-6 h-6 bg-slate-100 dark:bg-slate-700 rounded-full -left-3 ring-8 ring-white dark:ring-slate-900/50">
-                                                    <span className="material-symbols-outlined text-sm text-slate-500 dark:text-slate-400">storefront</span>
+                                                    <Store size={14} className="text-slate-500 dark:text-slate-400" />
                                                 </span>
                                                 <h3 className="mb-1 text-base font-semibold text-slate-500 dark:text-slate-400">Ready for Pickup</h3>
                                             </li>
@@ -761,31 +761,7 @@ const EmployeePage: React.FC = () => {
                         </div>
                     </main>
                 </div>
-                {isSidebarOpen && (
-                    <div className="fixed inset-0 bg-gray-800 bg-opacity-50 z-40 lg:hidden" onClick={() => setSidebarOpen(false)}></div>
-                )}
-                <div className={`fixed top-0 left-0 h-full bg-white dark:bg-gray-800 w-64 z-50 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-300 ease-in-out lg:hidden`}>
-                    <div className="p-5 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
-                        <h2 className="font-bold text-gray-900 dark:text-white">Menu</h2>
-                        <button onClick={() => setSidebarOpen(false)}>
-                            <span className="material-symbols-outlined text-2xl">close</span>
-                        </button>
-                    </div>
-                    <nav className="flex flex-col p-5 gap-4">
-                        <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="/user-dashboard" onClick={() => setSidebarOpen(false)}>Dashboard</Link>
-                        <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="/employee-page" onClick={() => setSidebarOpen(false)}>Raise New Card</Link>
-                        <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="/track-status" onClick={() => setSidebarOpen(false)}>Track Status</Link>
-                        <Link className="text-gray-800 dark:text-gray-300 hover:text-primary dark:hover:text-primary text-sm font-medium leading-normal" to="/user-dashboard" onClick={() => setSidebarOpen(false)}>Settings</Link>
-                        <button onClick={clearSession} className="text-left flex items-center gap-2 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-500 text-sm font-medium leading-normal">
-                            <span className="material-symbols-outlined">delete_forever</span>
-                            Clear Session
-                        </button>
-                        <button onClick={logout} className="text-left flex items-center gap-2 text-red-500 hover:text-red-700 text-sm font-medium leading-normal">
-                            <span className="material-symbols-outlined">logout</span>
-                            Logout
-                        </button>
-                    </nav>
-                </div>
+
             </div>
         </div>
     );

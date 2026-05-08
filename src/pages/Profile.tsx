@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/hooks/useAuth';
-import logo from '@/assets/CLOVE LOGO BLACK.png';
-import { Bell, Menu, X, LogOut, Save, User, Phone, MapPin, CreditCard, Droplet, Briefcase } from 'lucide-react';
+import { Save, User, Phone, MapPin, CreditCard, Droplet, Briefcase } from 'lucide-react';
+import AppHeader from '@/components/AppHeader';
 import { toast } from 'sonner';
 import { BLOOD_GROUPS, DEPARTMENTS } from '@/types/employee';
 import { useBranches } from '@/hooks/useBranches';
@@ -14,7 +14,6 @@ const Profile = () => {
     const navigate = useNavigate();
     const { userRole, logout } = useAuth();
     const { branches } = useBranches();
-    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [saving, setSaving] = useState(false);
     const [dynamicDepartments, setDynamicDepartments] = useState<string[]>([]);
 
@@ -147,26 +146,7 @@ const Profile = () => {
     return (
         <div className="relative flex h-auto min-h-screen w-full flex-col bg-[#F8F9FA] dark:bg-gray-900 group/design-root overflow-x-hidden">
             <div className="layout-container flex h-full grow flex-col">
-                <header className="flex items-center justify-between whitespace-nowrap border-b border-solid border-b-gray-200 dark:border-b-gray-700 px-4 py-3 bg-white dark:bg-gray-800 shadow-md">
-                    <div className="flex items-center gap-4 text-gray-900 dark:text-white">
-                        <button className="lg:hidden" onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
-                            <Menu className="h-6 w-6" />
-                        </button>
-                        <img src={logo} alt="Logo" className="h-8 w-auto" />
-                    </div>
-                    <div className="flex items-center justify-end gap-4">
-                        <button className="flex max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-full h-10 w-10 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">
-                            <Bell className="h-6 w-6" />
-                        </button>
-                        <div className="flex items-center gap-2">
-                            <div className="bg-center bg-no-repeat aspect-square bg-cover rounded-full size-10" style={{ backgroundImage: `url("${formData.avatar_url || DEFAULT_AVATAR}")` }}></div>
-                            <span className="font-semibold hidden md:block">{formData.full_name || 'User'}</span>
-                        </div>
-                        <button onClick={logout} className="hidden lg:flex max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-full h-10 w-10 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">
-                            <LogOut className="h-6 w-6" />
-                        </button>
-                    </div>
-                </header>
+                <AppHeader />
 
                 <main className="flex-1 px-4 py-8 sm:px-6 lg:px-10">
                     <div className="max-w-3xl mx-auto">
@@ -307,28 +287,7 @@ const Profile = () => {
                 </main>
             </div>
 
-            {/* Sidebar for mobile */}
-            {isSidebarOpen && (
-                <div className="fixed inset-0 bg-gray-800 bg-opacity-50 z-40 lg:hidden" onClick={() => setIsSidebarOpen(false)}></div>
-            )}
-            <div className={`fixed top-0 left-0 h-full bg-white dark:bg-gray-800 w-64 z-50 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-300 ease-in-out lg:hidden`}>
-                <div className="p-5 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
-                    <h2 className="font-bold">Menu</h2>
-                    <button onClick={() => setIsSidebarOpen(false)}>
-                        <X className="h-6 w-6" />
-                    </button>
-                </div>
-                <nav className="flex flex-col p-5 gap-4">
-                    <Link className="text-gray-800 dark:text-gray-300 hover:text-[#f48120] dark:hover:text-[#f48120] text-sm font-medium leading-normal" to="/user-dashboard" onClick={() => setIsSidebarOpen(false)}>Dashboard</Link>
-                    <Link className="text-gray-800 dark:text-gray-300 hover:text-[#f48120] dark:hover:text-[#f48120] text-sm font-medium leading-normal" to="/employee-page" onClick={() => setIsSidebarOpen(false)}>Raise New Card</Link>
-                    <Link className="text-gray-800 dark:text-gray-300 hover:text-[#f48120] dark:hover:text-[#f48120] text-sm font-medium leading-normal" to="/track-status" onClick={() => setIsSidebarOpen(false)}>Track Status</Link>
-                    <Link className="text-[#f48120] text-sm font-medium leading-normal" to="/profile" onClick={() => setIsSidebarOpen(false)}>Settings</Link>
-                    <button onClick={logout} className="text-left flex items-center gap-2 text-gray-800 dark:text-gray-300 hover:text-[#f48120] dark:hover:text-[#f48120] text-sm font-medium leading-normal">
-                        <LogOut className="h-5 w-5" />
-                        Logout
-                    </button>
-                </nav>
-            </div>
+
         </div>
     );
 };
