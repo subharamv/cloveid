@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import AppHeader from '../components/AppHeader';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
-import { Search, ChevronLeft, ChevronRight, User, Hash, Layers, Calendar, Clock, CheckSquare, Square, ArrowLeft, PackageCheck } from 'lucide-react';
+import { Search, ChevronLeft, ChevronRight, User, Hash, Layers, Calendar, Clock, CheckSquare, Square, ArrowLeft, PackageCheck, Package, Eye, Edit3, Trash2 } from 'lucide-react';
 
 interface CollectItem {
     id: number;
@@ -168,16 +168,16 @@ const CollectList = () => {
         setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
     };
 
-    const toggleSelectAll = () => {
-        const items = activeTab === 'to-collect' ? toCollectItems : collectedItems;
-        const filteredItems = items.filter(item =>
-            item.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            item.employeeId?.toLowerCase().includes(searchTerm.toLowerCase())
-        );
-        if (selected.length === filteredItems.length) {
-            setSelected([]);
+    const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.checked) {
+            const items = activeTab === 'to-collect' ? toCollectItems : collectedItems;
+            const filtered = items.filter(item =>
+                item.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                item.employeeId?.toLowerCase().includes(searchTerm.toLowerCase())
+            );
+            setSelected(filtered.map(item => item.id));
         } else {
-            setSelected(filteredItems.map(item => item.id));
+            setSelected([]);
         }
     };
 
@@ -206,6 +206,23 @@ const CollectList = () => {
         setSelected([]);
     };
 
+    const handleEditItem = (item: CollectItem) => {
+        navigate(`/edit-request/${item.id}?table=${item.source}`);
+    };
+
+    const handleDeleteItem = async (item: CollectItem) => {
+        if (!window.confirm('Are you sure you want to delete this card?')) return;
+        try {
+            const { error } = await supabase.from(item.source).delete().eq('id', item.id);
+            if (error) throw error;
+            toast.success('Card deleted successfully');
+            fetchItems();
+        } catch (err: any) {
+            console.error('Error deleting card:', err);
+            toast.error(`Failed to delete card: ${err?.message || 'Unknown error'}`);
+        }
+    };
+
     const items = activeTab === 'to-collect' ? toCollectItems : collectedItems;
 
     const filteredItems = items.filter(item =>
@@ -225,6 +242,12 @@ const CollectList = () => {
         { key: 'to-collect' as const, label: 'Ready to Collect', count: toCollectItems.length, icon: PackageCheck },
         { key: 'collected' as const, label: 'Collected', count: collectedItems.length, icon: PackageCheck },
     ];
+
+    const statsData = useMemo(() => [
+        { label: 'Ready to Collect', icon: PackageCheck, color: 'from-emerald-400 to-emerald-600', count: toCollectItems.length },
+        { label: 'Collected', icon: Package, color: 'from-violet-400 to-violet-600', count: collectedItems.length },
+        { label: 'Total Cards', icon: Layers, color: 'from-blue-400 to-blue-600', count: toCollectItems.length + collectedItems.length },
+    ], [toCollectItems.length, collectedItems.length]);
 
     const pageNumbers: (number | '...')[] = [];
     if (totalPages <= 7) {
@@ -249,216 +272,281 @@ const CollectList = () => {
 
     const renderTableHeader = () => (
         <thead>
-            <tr className="border-b border-gray-100 dark:border-gray-800">
+            <tr className="bg-gray-50 dark:bg-gray-900/30 border-t border-gray-100 dark:border-gray-700">
                 {activeTab === 'to-collect' && (
-                    <th className="px-4 py-3.5 text-left w-10">
-                        <button onClick={toggleSelectAll} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">
-                            {filteredItems.length > 0 && selected.length === filteredItems.length
-                                ? <CheckSquare size={16} className="text-orange-500" />
-                                : <Square size={16} />}
-                        </button>
+                    <th className="px-5 py-3.5 text-left w-10">
+                            <input
+                                type="checkbox"
+                                onChange={handleSelectAll}
+                                checked={filteredItems.length > 0 && selected.length === filteredItems.length}
+                                className="rounded border-gray-300 dark:border-gray-600"
+                            />
                     </th>
                 )}
-                <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Employee</th>
-                <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">ID</th>
-                <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Source</th>
-                <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
-                <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Batch</th>
+                <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Employee Name</th>
+                <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Employee ID</th>
+                <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Source</th>
+                <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
+                <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Batch</th>
                 {activeTab === 'to-collect' && (
-                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Processed</th>
+                    <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Processed</th>
                 )}
                 {activeTab === 'collected' && (
-                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Collected At</th>
+                    <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Collected At</th>
                 )}
-                <th className="px-4 py-3.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Action</th>
+                <th className="px-5 py-3.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
             </tr>
         </thead>
     );
 
     const renderTableRow = (item: CollectItem) => (
-        <tr key={`${item.source}-${item.id}`} className="border-b border-gray-50 dark:border-gray-800/50 hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors">
+        <tr key={`${item.source}-${item.id}`} className="hover:bg-gray-50 dark:hover:bg-gray-900/20 transition-colors">
             {activeTab === 'to-collect' && (
-                <td className="px-4 py-3.5">
-                    <button onClick={() => toggleSelect(item.id)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">
-                        {selected.includes(item.id)
-                            ? <CheckSquare size={16} className="text-orange-500" />
-                            : <Square size={16} />}
-                    </button>
+                <td className="px-5 py-4">
+                    <input
+                        type="checkbox"
+                        onChange={() => toggleSelect(item.id)}
+                        checked={selected.includes(item.id)}
+                        className="rounded border-gray-300 dark:border-gray-600"
+                        onClick={(e) => e.stopPropagation()}
+                    />
                 </td>
             )}
-            <td className="px-4 py-3.5">
+            <td className="px-5 py-4 text-sm font-medium text-gray-900 dark:text-white">
                 <div className="flex items-center gap-2.5">
                     <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center text-white text-xs font-bold shadow-sm">
                         {item.name?.charAt(0)?.toUpperCase() || '?'}
                     </div>
-                    <span className="text-sm font-medium text-gray-900 dark:text-white">{item.name}</span>
+                    <span>{item.name}</span>
                 </div>
             </td>
-            <td className="px-4 py-3.5 text-sm text-gray-600 dark:text-gray-400 font-mono">{item.employeeId}</td>
-            <td className="px-4 py-3.5">
-                <span className="text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800/50 px-2 py-1 rounded-md">{getSourceLabel(item.source)}</span>
+            <td className="px-5 py-4 text-sm text-gray-500 dark:text-gray-400">{item.employeeId}</td>
+            <td className="px-5 py-4">
+                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                    item.source === 'id_cards'
+                        ? 'bg-purple-50 text-purple-700 border border-purple-200 dark:bg-purple-900/20 dark:text-purple-400 dark:border-purple-800'
+                        : 'bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800'
+                }`}>
+                    {getSourceLabel(item.source)}
+                </span>
             </td>
-            <td className="px-4 py-3.5">{renderStatusBadge(item.print_status)}</td>
-            <td className="px-4 py-3.5 text-sm text-gray-500 dark:text-gray-400">{item.batch_id || '—'}</td>
+            <td className="px-5 py-4">{renderStatusBadge(item.print_status)}</td>
+            <td className="px-5 py-4 text-sm text-gray-500 dark:text-gray-400">{item.batch_id || '—'}</td>
             {activeTab === 'to-collect' && (
-                <td className="px-4 py-3.5 text-sm text-gray-500 dark:text-gray-400">{item.processed_date || '—'}</td>
+                <td className="px-5 py-4 text-sm text-gray-500 dark:text-gray-400">{item.processed_date || '—'}</td>
             )}
             {activeTab === 'collected' && (
-                <td className="px-4 py-3.5 text-sm text-gray-500 dark:text-gray-400">{item.collected_at || '—'}</td>
+                <td className="px-5 py-4 text-sm text-gray-500 dark:text-gray-400">{item.collected_at || '—'}</td>
             )}
-            <td className="px-4 py-3.5 text-right">
-                {activeTab === 'to-collect' ? (
-                    <button
-                        onClick={() => markCollected(item)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-emerald-600 text-white text-xs font-semibold hover:from-emerald-600 hover:to-emerald-700 shadow-sm shadow-emerald-200 dark:shadow-emerald-900/30 transition-all"
-                    >
-                        <PackageCheck size={14} />
-                        Mark Collected
-                    </button>
-                ) : (
-                    <span className="text-xs text-gray-400 dark:text-gray-500 italic">Collected</span>
-                )}
+            <td className="px-5 py-4 text-right">
+                <div className="flex items-center justify-end gap-1.5">
+                    {activeTab === 'to-collect' ? (
+                        <button
+                            onClick={() => markCollected(item)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500 text-white rounded-lg text-xs font-medium hover:bg-emerald-600 transition-colors"
+                        >
+                            <PackageCheck size={14} />
+                            Mark Collected
+                        </button>
+                    ) : (
+                        <div className="flex items-center gap-1.5">
+                            <button
+                                onClick={() => handleEditItem(item)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-blue-500 text-white rounded-lg text-xs font-medium hover:bg-blue-600 transition-colors"
+                            >
+                                <Edit3 size={13} />
+                                Edit
+                            </button>
+                            <button
+                                onClick={() => handleDeleteItem(item)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-red-500 text-white rounded-lg text-xs font-medium hover:bg-red-600 transition-colors"
+                            >
+                                <Trash2 size={13} />
+                                Delete
+                            </button>
+                        </div>
+                    )}
+                </div>
             </td>
         </tr>
     );
 
     const renderMobileCard = (item: CollectItem) => (
-        <div key={`${item.source}-${item.id}`} className="bg-white dark:bg-gray-900/50 rounded-xl border border-gray-100 dark:border-gray-800 p-4 shadow-sm">
-            <div className="flex items-start justify-between mb-3">
-                <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center text-white text-xs font-bold shadow-sm">
-                        {item.name?.charAt(0)?.toUpperCase() || '?'}
-                    </div>
-                    <div>
-                        <p className="text-sm font-semibold text-gray-900 dark:text-white">{item.name}</p>
-                        <p className="text-xs text-gray-500 font-mono">{item.employeeId}</p>
-                    </div>
+        <div key={`${item.source}-${item.id}`} className="p-4">
+            <div className="flex items-start gap-3 mb-3">
+                {activeTab === 'to-collect' && (
+                    <input
+                        type="checkbox"
+                        onChange={() => toggleSelect(item.id)}
+                        checked={selected.includes(item.id)}
+                        className="mt-1 rounded border-gray-300 dark:border-gray-600"
+                    />
+                )}
+                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center text-white text-xs font-bold shadow-sm shrink-0">
+                    {item.name?.charAt(0)?.toUpperCase() || '?'}
                 </div>
-                {renderStatusBadge(item.print_status)}
+                <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">{item.name}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{item.employeeId}</p>
+                </div>
+                <div className="flex flex-col items-end gap-1.5">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium ${
+                        item.source === 'id_cards'
+                            ? 'bg-purple-50 text-purple-700 border border-purple-200 dark:bg-purple-900/20 dark:text-purple-400 dark:border-purple-800'
+                            : 'bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800'
+                    }`}>
+                        {getSourceLabel(item.source)}
+                    </span>
+                    {renderStatusBadge(item.print_status)}
+                </div>
             </div>
-            <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-gray-500 dark:text-gray-400 mb-3">
-                <span className="flex items-center gap-1"><Layers size={12} />{getSourceLabel(item.source)}</span>
-                <span className="flex items-center gap-1"><Hash size={12} />{item.batch_id || '—'}</span>
+            <div className="grid grid-cols-2 gap-2 mb-3 text-xs text-gray-500 dark:text-gray-400">
+                {item.batch_id && (
+                    <div>
+                        <span className="font-medium uppercase text-[10px] text-gray-400 dark:text-gray-500">Batch</span>
+                        <p className="text-gray-900 dark:text-gray-200">{item.batch_id}</p>
+                    </div>
+                )}
                 {activeTab === 'to-collect' && item.processed_date && (
-                    <span className="flex items-center gap-1"><Calendar size={12} />{item.processed_date}</span>
+                    <div>
+                        <span className="font-medium uppercase text-[10px] text-gray-400 dark:text-gray-500">Processed</span>
+                        <p className="text-gray-900 dark:text-gray-200">{item.processed_date}</p>
+                    </div>
                 )}
                 {activeTab === 'collected' && item.collected_at && (
-                    <span className="flex items-center gap-1"><Clock size={12} />{item.collected_at}</span>
+                    <div>
+                        <span className="font-medium uppercase text-[10px] text-gray-400 dark:text-gray-500">Collected At</span>
+                        <p className="text-gray-900 dark:text-gray-200">{item.collected_at}</p>
+                    </div>
                 )}
             </div>
-            {activeTab === 'to-collect' && (
-                <div className="flex gap-2">
-                    <button
-                        onClick={() => toggleSelect(item.id)}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
-                            selected.includes(item.id)
-                                ? 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800 text-orange-600 dark:text-orange-400'
-                                : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400'
-                        }`}
-                    >
-                        {selected.includes(item.id) ? <CheckSquare size={14} /> : <Square size={14} />}
-                        {selected.includes(item.id) ? 'Selected' : 'Select'}
-                    </button>
-                    <button
-                        onClick={() => markCollected(item)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-emerald-600 text-white text-xs font-semibold hover:from-emerald-600 hover:to-emerald-700 transition-all"
-                    >
-                        <PackageCheck size={14} /> Collect
-                    </button>
-                </div>
-            )}
-            {activeTab === 'collected' && (
-                <p className="text-xs text-gray-400 italic">Already collected</p>
-            )}
+            <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-gray-100 dark:border-gray-700">
+                {activeTab === 'to-collect' ? (
+                    <>
+                        <button
+                            onClick={() => markCollected(item)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500 text-white rounded-lg text-xs font-medium hover:bg-emerald-600 transition-colors"
+                        >
+                            <PackageCheck size={14} /> Collect
+                        </button>
+                    </>
+                ) : (
+                    <div className="flex items-center gap-1.5">
+                        <button
+                            onClick={() => handleEditItem(item)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-blue-500 text-white rounded-lg text-xs font-medium hover:bg-blue-600 transition-colors"
+                        >
+                            <Edit3 size={13} />
+                            Edit
+                        </button>
+                        <button
+                            onClick={() => handleDeleteItem(item)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-red-500 text-white rounded-lg text-xs font-medium hover:bg-red-600 transition-colors"
+                        >
+                            <Trash2 size={13} />
+                            Delete
+                        </button>
+                    </div>
+                )}
+            </div>
         </div>
     );
 
     return (
-        <div className="relative flex h-auto min-h-screen w-full flex-col bg-background-light dark:bg-background-dark group/design-root overflow-x-hidden">
-            <div className="layout-container flex h-full grow flex-col">
-                <AppHeader />
-                <main className="flex-1 px-4 py-8 sm:px-6 lg:px-10">
-                    {/* Header */}
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
-                        <div className="flex items-center gap-3">
-                            <button
-                                onClick={() => navigate('/dashboard')}
-                                className="w-9 h-9 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 flex items-center justify-center text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600 transition-all shadow-sm"
-                            >
-                                <ArrowLeft size={18} />
-                            </button>
-                            <div>
-                                <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white tracking-tight">Cards Collection</h1>
-                                <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Manage card pickup and collection records</p>
-                            </div>
-                        </div>
-                        {activeTab === 'to-collect' && (
-                            <button
-                                onClick={bulkMarkCollected}
-                                disabled={selected.length === 0}
-                                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 text-white text-sm font-semibold hover:from-emerald-600 hover:to-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-emerald-200/50 dark:shadow-emerald-900/30 transition-all"
-                            >
-                                <PackageCheck size={18} />
-                                Collect Selected ({selected.length})
-                            </button>
-                        )}
+        <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-950 dark:to-gray-900">
+            <AppHeader />
+            <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 lg:py-10">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
+                    <div>
+                        <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">Cards Collection</h1>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                            Manage card pickup and collection records
+                        </p>
                     </div>
+                    {activeTab === 'to-collect' && (
+                        <button
+                            onClick={bulkMarkCollected}
+                            disabled={selected.length === 0}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-500 text-white rounded-xl text-sm font-medium disabled:bg-gray-300 dark:disabled:bg-gray-600 disabled:text-gray-500 hover:bg-emerald-600 transition-colors"
+                        >
+                            <PackageCheck size={15} />
+                            Collect Selected ({selected.length})
+                        </button>
+                    )}
+                </div>
 
-                    {/* Tabs */}
-                    <div className="flex gap-1.5 mb-6 bg-gray-100 dark:bg-gray-800/50 p-1 rounded-xl w-fit">
-                        {tabs.map(tab => (
+                {/* Stats Cards */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
+                    {statsData.map(stat => {
+                        const Icon = stat.icon;
+                        return (
                             <button
-                                key={tab.key}
-                                onClick={() => { setActiveTab(tab.key); setCurrentPage(1); setSelected([]); }}
-                                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                                    activeTab === tab.key
-                                        ? 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white shadow-sm'
-                                        : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                                key={stat.label}
+                                onClick={() => {
+                                    setActiveTab(stat.label === 'Ready to Collect' ? 'to-collect' : 'collected');
+                                    setCurrentPage(1);
+                                    setSelected([]);
+                                }}
+                                className={`group bg-white dark:bg-gray-800/80 rounded-xl border p-4 hover:shadow-md transition-all text-left ${
+                                    (stat.label === 'Ready to Collect' && activeTab === 'to-collect') ||
+                                    (stat.label === 'Collected' && activeTab === 'collected')
+                                        ? 'border-orange-300 dark:border-orange-700 ring-1 ring-orange-200 dark:ring-orange-800'
+                                        : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
                                 }`}
                             >
-                                <tab.icon size={16} />
-                                {tab.label}
-                                <span className={`text-xs px-1.5 py-0.5 rounded-full ${
-                                    activeTab === tab.key
-                                        ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400'
-                                        : 'bg-gray-200 dark:bg-gray-700 text-gray-500'
-                                }`}>
-                                    {tab.count}
-                                </span>
+                                <div className="flex items-center justify-between mb-3">
+                                    <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${stat.color} flex items-center justify-center shadow-sm`}>
+                                        <Icon size={16} className="text-white" />
+                                    </div>
+                                    <ChevronRight size={14} className="text-gray-300 dark:text-gray-600 group-hover:translate-x-0.5 transition-transform" />
+                                </div>
+                                <p className="text-2xl font-bold text-gray-900 dark:text-white">{stat.count}</p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{stat.label}</p>
                             </button>
-                        ))}
-                    </div>
+                        );
+                    })}
+                </div>
 
-                    {/* Search & Per Page */}
-                    <div className="flex flex-col sm:flex-row gap-3 mb-6">
-                        <div className="relative flex-1">
-                            <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                            <input
-                                type="text"
-                                placeholder="Search by name or employee ID..."
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                                className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm placeholder:text-gray-400 focus:ring-2 focus:ring-orange-500/20 focus:border-orange-400 outline-none transition-all"
-                            />
+                {/* Main Card */}
+                <div className="bg-white dark:bg-gray-800/80 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden mb-8">
+                    <div className="p-5 sm:p-6">
+                        {/* Tab Filters */}
+                        <div className="flex gap-2 overflow-x-auto pb-4 mb-4 scrollbar-none">
+                            {tabs.map(tab => (
+                                <button
+                                    key={tab.key}
+                                    onClick={() => { setActiveTab(tab.key); setCurrentPage(1); setSelected([]); }}
+                                    className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
+                                        activeTab === tab.key
+                                            ? 'bg-orange-500 text-white shadow-sm'
+                                            : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                                    }`}
+                                >
+                                    {tab.label}
+                                    <span className={`ml-2 text-xs px-1.5 py-0.5 rounded-full ${
+                                        activeTab === tab.key
+                                            ? 'bg-white/20 text-white'
+                                            : 'bg-gray-200 dark:bg-gray-600 text-gray-500 dark:text-gray-400'
+                                    }`}>
+                                        {tab.count}
+                                    </span>
+                                </button>
+                            ))}
                         </div>
-                        <div className="flex items-center gap-2">
-                            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Per page:</label>
-                            <select
-                                value={itemsPerPage}
-                                onChange={(e) => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}
-                                className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-orange-500/20 focus:border-orange-400 outline-none transition-all"
-                            >
-                                <option value={30}>30</option>
-                                <option value={50}>50</option>
-                                <option value={100}>100</option>
-                            </select>
-                        </div>
-                    </div>
 
-                    {/* Results count */}
-                    <div className="flex items-center gap-2 mb-4 text-sm text-gray-500 dark:text-gray-400">
-                        <div className="w-1.5 h-1.5 rounded-full bg-orange-400" />
-                        Showing {paginatedItems.length > 0 ? startIndex + 1 : 0}–{Math.min(startIndex + itemsPerPage, filteredItems.length)} of {filteredItems.length} cards
+                        {/* Search */}
+                        <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
+                            <div className="relative w-full sm:w-72">
+                                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                                <input
+                                    type="text"
+                                    placeholder="Search by name or employee ID..."
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    className="w-full pl-9 pr-4 py-2 bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-xl text-sm text-gray-900 dark:text-white placeholder:text-gray-400 focus:ring-2 focus:ring-orange-500/20 focus:border-orange-400 outline-none transition-all"
+                                />
+                            </div>
+                        </div>
                     </div>
 
                     {/* Loading */}
@@ -471,18 +559,16 @@ const CollectList = () => {
                     {/* Desktop Table */}
                     {!loading && (
                         <>
-                            <div className="hidden md:block bg-white dark:bg-gray-900/50 rounded-xl border border-gray-100 dark:border-gray-800 shadow-sm overflow-hidden">
+                            <div className="hidden md:block overflow-x-auto">
                                 <table className="w-full">
                                     {renderTableHeader()}
-                                    <tbody>
-                                        {paginatedItems.map(renderTableRow)}
-                                        {paginatedItems.length === 0 && (
+                                    <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                                        {paginatedItems.length > 0 ? (
+                                            paginatedItems.map(renderTableRow)
+                                        ) : (
                                             <tr>
-                                                <td colSpan={activeTab === 'to-collect' ? 9 : 8} className="px-4 py-12 text-center">
-                                                    <div className="flex flex-col items-center gap-2 text-gray-400">
-                                                        <PackageCheck size={32} className="text-gray-300 dark:text-gray-600" />
-                                                        <p className="text-sm">{searchTerm ? 'No cards match your search' : 'No cards found'}</p>
-                                                    </div>
+                                                <td colSpan={activeTab === 'to-collect' ? 9 : 8} className="px-5 py-12 text-center text-sm text-gray-400">
+                                                    {searchTerm ? 'No cards match your search.' : 'No cards found.'}
                                                 </td>
                                             </tr>
                                         )}
@@ -491,62 +577,83 @@ const CollectList = () => {
                             </div>
 
                             {/* Mobile Cards */}
-                            <div className="md:hidden space-y-3">
-                                {paginatedItems.length === 0 ? (
-                                    <div className="flex flex-col items-center gap-2 py-12 text-gray-400">
-                                        <PackageCheck size={32} className="text-gray-300 dark:text-gray-600" />
-                                        <p className="text-sm">{searchTerm ? 'No cards match your search' : 'No cards found'}</p>
-                                    </div>
-                                ) : (
+                            <div className="md:hidden divide-y divide-gray-100 dark:divide-gray-700">
+                                {paginatedItems.length > 0 ? (
                                     paginatedItems.map(renderMobileCard)
+                                ) : (
+                                    <div className="p-8 text-center">
+                                        <div className="w-12 h-12 rounded-xl bg-gray-100 dark:bg-gray-700 flex items-center justify-center mx-auto mb-3">
+                                            <Search size={20} className="text-gray-400" />
+                                        </div>
+                                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                                            {searchTerm ? 'No cards match your search.' : 'No cards found.'}
+                                        </p>
+                                    </div>
+                                )}
+                                {filteredItems.length > 0 && (
+                                    <div className="px-5 py-3 border-t border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/20">
+                                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                                            Showing {filteredItems.length} of {toCollectItems.length + collectedItems.length} cards
+                                        </p>
+                                    </div>
                                 )}
                             </div>
 
-                            {/* Pagination */}
-                            {totalPages > 1 && (
-                                <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-                                    <p className="text-xs text-gray-400">
-                                        Page {currentPage} of {totalPages}
-                                    </p>
-                                    <div className="flex items-center gap-1">
-                                        <button
-                                            onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                                            disabled={currentPage === 1}
-                                            className="w-9 h-9 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600 disabled:opacity-30 disabled:cursor-not-allowed transition-all bg-white dark:bg-gray-800"
-                                        >
-                                            <ChevronLeft size={16} />
-                                        </button>
-                                        {pageNumbers.map((page, i) =>
-                                            page === '...' ? (
-                                                <span key={`ellipsis-${i}`} className="px-2 text-gray-400 text-sm">...</span>
-                                            ) : (
-                                                <button
-                                                    key={page}
-                                                    onClick={() => setCurrentPage(page)}
-                                                    className={`min-w-[36px] h-9 rounded-lg text-sm font-medium transition-all ${
-                                                        currentPage === page
-                                                            ? 'bg-gradient-to-r from-orange-400 to-orange-600 text-white shadow-sm shadow-orange-200 dark:shadow-orange-900/30'
-                                                            : 'border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 bg-white dark:bg-gray-800'
-                                                    }`}
-                                                >
-                                                    {page}
-                                                </button>
-                                            )
-                                        )}
-                                        <button
-                                            onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                                            disabled={currentPage === totalPages}
-                                            className="w-9 h-9 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600 disabled:opacity-30 disabled:cursor-not-allowed transition-all bg-white dark:bg-gray-800"
-                                        >
-                                            <ChevronRight size={16} />
-                                        </button>
-                                    </div>
+                            {/* Footer */}
+                            <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-4 border-t border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/20">
+                                <div className="flex items-center gap-2">
+                                    <label className="text-sm text-gray-600 dark:text-gray-400">Rows:</label>
+                                    <select
+                                        value={itemsPerPage}
+                                        onChange={e => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}
+                                        className="px-2 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm"
+                                    >
+                                        <option value={10}>10</option>
+                                        <option value={20}>20</option>
+                                        <option value={30}>30</option>
+                                        <option value={50}>50</option>
+                                        <option value={100}>100</option>
+                                    </select>
                                 </div>
-                            )}
+
+                                <div className="flex items-center gap-1">
+                                    <button
+                                        onClick={() => setCurrentPage(1)}
+                                        disabled={currentPage <= 1}
+                                        className="px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-sm disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-700"
+                                    >
+                                        &#171;
+                                    </button>
+                                    <button
+                                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                        disabled={currentPage <= 1}
+                                        className="px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-sm disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-700"
+                                    >
+                                        &#8249;
+                                    </button>
+                                    <span className="px-4 py-1.5 text-sm text-gray-700 dark:text-gray-300">
+                                        Page {currentPage} of {totalPages}
+                                    </span>
+                                    <button
+                                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                        disabled={currentPage >= totalPages}
+                                        className="px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-sm disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-700"
+                                    >
+                                        &#8250;
+                                    </button>
+                                    <button
+                                        onClick={() => setCurrentPage(totalPages)}
+                                        disabled={currentPage >= totalPages}
+                                        className="px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-sm disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-700"
+                                    >
+                                        &#187;
+                                    </button>
+                                </div>
+                            </div>
                         </>
                     )}
-                </main>
-            </div>
+                </div>
+            </main>
         </div>
     );
 };

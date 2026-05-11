@@ -26,6 +26,7 @@ import { supabase } from '@/lib/supabaseClient';
 import AppHeader from '../components/AppHeader';
 import { useAuth } from '@/hooks/useAuth';
 import { ProgressBar } from '@/components/ProgressBar';
+import { useStorageProvider } from '@/hooks/useStorageProvider';
 
 const SingleCard: React.FC = () => {
     const { userRole } = useAuth();
@@ -33,6 +34,7 @@ const SingleCard: React.FC = () => {
     const navigate = useNavigate();
 
     const { downloadZip } = useDownloadZip();
+    const { uploadZip } = useStorageProvider();
     const [frontLogoDataUrl, setFrontLogoDataUrl] = useState<string>('');
     const [backLogoDataUrl, setBackLogoDataUrl] = useState<string>('');
     const [requestId, setRequestId] = useState<string | null>(null);
@@ -47,14 +49,48 @@ const SingleCard: React.FC = () => {
         photo: null,
     });
 
+    const batchState = location.state as {
+        sourceTable?: string;
+        employee?: Employee;
+        headers?: string[];
+        rowIndex?: number;
+        csvData?: any[][];
+        zipUrls?: Record<number, string>;
+        cardIds?: Record<number, number>;
+        batchId?: string;
+        cardPrintStatuses?: Record<number, string>;
+        cardId?: number;
+        viewOnly?: boolean;
+        returnPath?: string;
+    } | null;
+
     useEffect(() => {
         const params = new URLSearchParams(location.search);
         const id = params.get('requestId');
-        if (id) {
+
+        if (batchState?.employee && batchState?.sourceTable === 'id_cards') {
+            setRequestId(id);
+            setEmployee(batchState.employee);
+            if (batchState.employee.photo_url) {
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                img.onload = () => {
+                    setEditor(prev => ({
+                        ...prev,
+                        img,
+                        scale: 1,
+                        rotation: 0,
+                        tx: 0,
+                        ty: 0,
+                    }));
+                };
+                img.src = batchState.employee.photo_url;
+            }
+        } else if (id) {
             setRequestId(id);
             fetchRequestDetails(id);
         }
-    }, [location.search]);
+    }, [location.search, location.state]);
 
     const fetchRequestDetails = async (id: string) => {
         try {
@@ -546,7 +582,7 @@ const SingleCard: React.FC = () => {
             const url = URL.createObjectURL(zipBlob);
             const link = document.createElement('a');
             link.href = url;
-            link.download = `${employee.fullName.replace(/ /g, '_')}_ID_Card.zip`;
+            link.download = `${employee.fullName.replace(/ /g, '_')}_${employee.employeeId}_ID_Card.zip`;
             link.style.display = 'none';
             document.body.appendChild(link);
             link.click();
@@ -756,23 +792,115 @@ const SingleCard: React.FC = () => {
                 filters
             );
 
-            // Upload ZIP to Supabase Storage
-            const zipFileName = `zips/${employee.fullName.replace(/ /g, '_')}_ID_Card.zip`;
-            const { error: zipError } = await supabase.storage
-                .from('id-card-images')
-                .upload(zipFileName, zipBlob, { upsert: true });
+            // Upload ZIP to active storage provider (Supabase or Google Drive)
+            const zipFileName = `${employee.fullName.replace(/ /g, '_')}_${employee.employeeId}_ID_Card.zip`;
+            const zipUrl = await uploadZip(zipBlob, zipFileName, batchState?.sourceTable === 'id_cards' ? 'batch' : 'single');
 
-            if (zipError) {
-                throw zipError;
+            // Handle batch context (from ImportManagement)
+            if (batchState?.sourceTable === 'id_cards') {
+                const headerMapping: Record<string, string> = {
+                    'full name': 'fullName',
+                    'employee id': 'employeeId',
+                    'blood group': 'bloodGroup',
+                    'branch': 'branch',
+                    'emergency contact': 'emergencyContact',
+                    'emergency no': 'emergencyContact',
+                    'photo': 'photo_url',
+                    'image': 'photo_url',
+                    'photo (upload)': 'photo_url',
+                };
+
+                const newCardData: Record<string, any> = {};
+                const originalRow = batchState.csvData?.[batchState.rowIndex!];
+                if (batchState.headers) {
+                    batchState.headers.forEach((header: string, headerIdx: number) => {
+                        const key = header.trim().toLowerCase();
+                        const employeeKey = headerMapping[key];
+                        if (employeeKey) {
+                            newCardData[header] = employee[employeeKey as keyof Employee] || '';
+                        } else if (originalRow?.[headerIdx] !== undefined) {
+                            newCardData[header] = originalRow[headerIdx];
+                        }
+                    });
+                }
+
+                let cardId = batchState.cardId;
+                if (!cardId) {
+                    const { data: insertData, error: insertError } = await supabase
+                        .from('id_cards')
+                        .insert({
+                            employee_id: employee.employeeId,
+                            batch_id: batchState.batchId,
+                            card_data: newCardData,
+                            photo_url: employee.photo_url || null,
+                            zip_url: zipUrl,
+                            created_at: new Date().toISOString(),
+                            updated_at: new Date().toISOString()
+                        })
+                        .select('id')
+                        .single();
+
+                    if (insertError || !insertData) {
+                        console.error('Error inserting id_cards:', insertError);
+                        toast.error('Failed to save card details.');
+                        return;
+                    }
+                    cardId = insertData.id;
+                } else {
+                    const { error: updateError } = await supabase
+                        .from('id_cards')
+                        .update({
+                            card_data: newCardData,
+                            photo_url: employee.photo_url || null,
+                            zip_url: zipUrl,
+                            updated_at: new Date().toISOString()
+                        })
+                        .eq('id', cardId);
+
+                    if (updateError) {
+                        console.error('Error updating id_cards:', updateError);
+                        toast.error('Failed to save card details.');
+                        return;
+                    }
+                }
+
+                toast.success('Card saved successfully!');
+
+                const updatedCsvData = batchState.csvData ? batchState.csvData.map((row: any[], idx: number) => {
+                    if (idx === batchState.rowIndex && batchState.headers) {
+                        const newRow = [...row];
+                        batchState.headers.forEach((header: string, headerIdx: number) => {
+                            const key = header.trim().toLowerCase();
+                            const employeeKey = headerMapping[key];
+                            if (employeeKey) {
+                                newRow[headerIdx] = employee[employeeKey as keyof Employee] || '';
+                            }
+                        });
+                        return newRow;
+                    }
+                    return row;
+                }) : undefined;
+
+                const updatedZipUrls = batchState.zipUrls ? { ...batchState.zipUrls, [batchState.rowIndex!]: zipUrl } : undefined;
+                const updatedCardIds = batchState.cardIds ? [...batchState.cardIds] : [];
+                if (batchState.rowIndex !== undefined && !batchState.cardIds?.[batchState.rowIndex]) {
+                    updatedCardIds[batchState.rowIndex] = cardId!;
+                }
+
+                navigate(batchState.returnPath || '/import-management', {
+                    state: {
+                        csvData: updatedCsvData || batchState.csvData,
+                        headers: batchState.headers,
+                        zipUrls: updatedZipUrls || batchState.zipUrls,
+                        cardIds: updatedCardIds.length ? updatedCardIds : batchState.cardIds,
+                        batchId: batchState.batchId,
+                        cardPrintStatuses: batchState.cardPrintStatuses,
+                    }
+                });
+                return;
             }
 
-            const { data: publicUrlData } = supabase.storage
-                .from('id-card-images')
-                .getPublicUrl(zipFileName);
-
-            const zipUrl = publicUrlData.publicUrl;
-
-            // Save to database
+            // Normal flow: save to card_details
             const cardData = {
                 full_name: employee.fullName,
                 employee_id: employee.employeeId,
@@ -795,7 +923,6 @@ const SingleCard: React.FC = () => {
                 toast.error('Failed to save card details.');
             } else {
                 toast.success('Card details saved successfully!');
-                // Reset form after successful save
                 handleReset();
             }
         } catch (error) {
@@ -820,7 +947,7 @@ const SingleCard: React.FC = () => {
                     className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-3 transition-colors"
                 >
                     <span className="material-symbols-outlined text-lg">arrow_back</span>
-                    Back
+                    <span className="hidden md:inline">Back</span>
                 </button>
                 <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-6">
                     {/* Left: Card Previews */}
@@ -937,6 +1064,7 @@ const SingleCard: React.FC = () => {
                                 employee={employee}
                                 isPhotoUploaded={!!editor.img}
                                 onSave={handleSave}
+                                onCancel={() => navigate(-1)}
                                 onDownloadPNG={async () => {
                                     toast.info('Generating PNG files...');
 

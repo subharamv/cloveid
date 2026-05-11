@@ -10,7 +10,7 @@ import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabaseClient';
 import AppHeader from '@/components/AppHeader';
-import { CloudUpload, Check, Edit2, ZoomOut, ZoomIn, RotateCcw, RotateCw, RefreshCw, Hourglass, ShieldCheck, Printer, Store } from 'lucide-react';
+import { CloudUpload, Check, Edit2, ZoomOut, ZoomIn, RotateCcw, RotateCw, RefreshCw } from 'lucide-react';
 
 
 import logo from '@/assets/CLOVE LOGO BLACK.png';
@@ -719,43 +719,7 @@ const EmployeePage: React.FC = () => {
                                             </div>
                                         </div>
                                     </div>
-                                    <div className="bg-white dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-800 p-6 sm:p-8">
-                                        <h2 className="text-slate-900 dark:text-white text-[22px] font-bold leading-tight tracking-[-0.015em] mb-6">Your Request Status</h2>
-                                        <ol className="relative border-l border-slate-200 dark:border-slate-700 space-y-8">
-                                            <li className="ml-6">
-                                                <span className="absolute flex items-center justify-center w-6 h-6 bg-green-100 dark:bg-green-900 rounded-full -left-3 ring-8 ring-white dark:ring-slate-900/50">
-                                                    <Check size={14} className="text-green-600 dark:text-green-400" />
-                                                </span>
-                                                <h3 className="flex items-center mb-1 text-base font-semibold text-slate-900 dark:text-white">Submitted</h3>
-                                                <time className="block mb-2 text-sm font-normal leading-none text-slate-400 dark:text-slate-500">October 25th, 2023</time>
-                                            </li>
-                                            <li className="ml-6">
-                                                <span className="absolute flex items-center justify-center w-6 h-6 bg-yellow-100 dark:bg-yellow-900 rounded-full -left-3 ring-8 ring-white dark:ring-slate-900/50">
-                                                    <Hourglass size={14} className="text-yellow-600 dark:text-yellow-400" />
-                                                </span>
-                                                <h3 className="mb-1 text-base font-semibold text-slate-900 dark:text-white">In Review</h3>
-                                                <time className="block mb-2 text-sm font-normal leading-none text-slate-400 dark:text-slate-500">Pending HR Approval</time>
-                                            </li>
-                                            <li className="ml-6">
-                                                <span className="absolute flex items-center justify-center w-6 h-6 bg-slate-100 dark:bg-slate-700 rounded-full -left-3 ring-8 ring-white dark:ring-slate-900/50">
-                                                    <ShieldCheck size={14} className="text-slate-500 dark:text-slate-400" />
-                                                </span>
-                                                <h3 className="mb-1 text-base font-semibold text-slate-500 dark:text-slate-400">Approved</h3>
-                                            </li>
-                                            <li className="ml-6">
-                                                <span className="absolute flex items-center justify-center w-6 h-6 bg-slate-100 dark:bg-slate-700 rounded-full -left-3 ring-8 ring-white dark:ring-slate-900/50">
-                                                    <Printer size={14} className="text-slate-500 dark:text-slate-400" />
-                                                </span>
-                                                <h3 className="mb-1 text-base font-semibold text-slate-500 dark:text-slate-400">Printed</h3>
-                                            </li>
-                                            <li className="ml-6">
-                                                <span className="absolute flex items-center justify-center w-6 h-6 bg-slate-100 dark:bg-slate-700 rounded-full -left-3 ring-8 ring-white dark:ring-slate-900/50">
-                                                    <Store size={14} className="text-slate-500 dark:text-slate-400" />
-                                                </span>
-                                                <h3 className="mb-1 text-base font-semibold text-slate-500 dark:text-slate-400">Ready for Pickup</h3>
-                                            </li>
-                                        </ol>
-                                    </div>
+
                                 </div>
                             </div>
                         </div>

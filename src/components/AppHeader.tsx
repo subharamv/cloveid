@@ -1,13 +1,16 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useBranding } from '../hooks/useBranding';
+import { supabase } from '../lib/supabaseClient';
 import { CardNavItem } from './ui/CardNav';
 import CardNav from './ui/CardNav';
 import NewBatchModal from './NewBatchModal';
 import ProfileModal from './ProfileModal';
+import RaiseIssueModal from './issues/RaiseIssueModal';
+import AdminIssuesPanel from './issues/AdminIssuesPanel';
 import logo from '../assets/CLOVE LOGO BLACK.png';
-import { XCircle } from 'lucide-react';
+import { XCircle, HelpCircle } from 'lucide-react';
 
 const NewBatchLink = {
   label: "New Batch", href: "", ariaLabel: "Create New Batch"
@@ -20,7 +23,7 @@ const adminItems = (openNewBatch: () => void): CardNavItem[] => [
     textColor: "#fff",
     links: [
       { label: "Overview", href: "/dashboard", ariaLabel: "Dashboard Overview" },
-      { label: "User Dashboard", href: "/user-dashboard", ariaLabel: "Switch to User Dashboard" },
+      { label: "Bulk Import", href: "/bulk-card-import", ariaLabel: "Bulk Card Import" },
       { ...NewBatchLink, onClick: openNewBatch },
     ]
   },
@@ -30,8 +33,8 @@ const adminItems = (openNewBatch: () => void): CardNavItem[] => [
     textColor: "#fff",
     links: [
       { label: "Manage Requests", href: "/manage-requests", ariaLabel: "Manage Employee Requests" },
-      { label: "Issued Cards", href: "/issued-cards", ariaLabel: "Issued ID Cards" },
-      { label: "Bulk Import", href: "/bulk-card-import", ariaLabel: "Bulk Card Import" },
+      { label: "View Single Cards", href: "/single-card-tracking", ariaLabel: "View Single Cards" },
+      { label: "Batch Management", href: "/batches", ariaLabel: "Batch Management" },
     ]
   },
   {
@@ -39,6 +42,7 @@ const adminItems = (openNewBatch: () => void): CardNavItem[] => [
     bgColor: "#2F293A",
     textColor: "#fff",
     links: [
+      { label: "Issued Cards", href: "/issued-cards", ariaLabel: "Issued ID Cards" },
       { label: "Vendor Management", href: "/vendor", ariaLabel: "Vendor Management" },
       { label: "User Management", href: "/user-management", ariaLabel: "User Management" },
       { label: "Branding", href: "/settings/branding", ariaLabel: "Branding Settings" },
@@ -55,6 +59,14 @@ const userItems = (openProfile: () => void, showAdminLink?: boolean): CardNavIte
       ...(showAdminLink ? [{ label: "Admin Dashboard", href: "/dashboard", ariaLabel: "Switch to Admin Dashboard" }] : []),
       { label: "Overview", href: "/user-dashboard", ariaLabel: "User Dashboard" },
       { label: "Raise New Card", href: "/employee-page", ariaLabel: "Request New ID Card" },
+    ]
+  },
+  {
+    label: "Support",
+    bgColor: "#2F293A",
+    textColor: "#fff",
+    links: [
+      { label: "Raise Issue", href: "#", ariaLabel: "Raise an Issue", onClick: () => window.dispatchEvent(new CustomEvent('open-raise-issue')) },
     ]
   },
   {
@@ -76,6 +88,14 @@ const vendorItems: CardNavItem[] = [
       { label: "Active Requests", href: "/vendor-dashboard?tab=active", ariaLabel: "Active Requests" },
       { label: "Completed Cards", href: "/vendor-dashboard?tab=completed", ariaLabel: "Completed Cards" },
     ]
+  },
+  {
+    label: "Support",
+    bgColor: "#2F293A",
+    textColor: "#fff",
+    links: [
+      { label: "Raise Issue", href: "#", ariaLabel: "Raise an Issue", onClick: () => window.dispatchEvent(new CustomEvent('open-raise-issue')) },
+    ]
   }
 ];
 
@@ -83,8 +103,12 @@ const AppHeader: React.FC = () => {
   const { user, userRole, logout, clearSession } = useAuth();
   const { branding } = useBranding();
   const location = useLocation();
+  const navigate = useNavigate();
   const [newBatchOpen, setNewBatchOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [raiseIssueOpen, setRaiseIssueOpen] = useState(false);
+  const [showIssuesPanel, setShowIssuesPanel] = useState(false);
+  const [openIssuesCount, setOpenIssuesCount] = useState(0);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   const avatarRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -114,6 +138,28 @@ const AppHeader: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    const handler = () => setRaiseIssueOpen(true);
+    window.addEventListener('open-raise-issue', handler);
+    return () => window.removeEventListener('open-raise-issue', handler);
+  }, []);
+
+  useEffect(() => {
+    if (!isAdmin || isOnUserRoute) return;
+    const fetchOpenCount = async () => {
+      try {
+        const { count } = await supabase
+          .from('issues')
+          .select('*', { count: 'exact', head: true })
+          .in('status', ['open', 'in_progress']);
+        setOpenIssuesCount(count || 0);
+      } catch {}
+    };
+    fetchOpenCount();
+    const interval = setInterval(fetchOpenCount, 30000);
+    return () => clearInterval(interval);
+  }, [isAdmin, isOnUserRoute]);
+
+  useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (!profileDropdownOpen) return;
       if (
@@ -138,8 +184,32 @@ const AppHeader: React.FC = () => {
     setProfileDropdownOpen(!profileDropdownOpen);
   };
 
+  const isAdminOrManager = isAdmin && !isOnUserRoute;
+
+  const handleUserDashboard = () => {
+    navigate('/user-dashboard');
+  };
+
+  const userDashboardBtn = (
+    <button
+      onClick={handleUserDashboard}
+      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-xs font-medium transition-colors"
+    >
+      User Dashboard
+    </button>
+  );
+
+  const mobileContent = isAdminOrManager ? (
+    <div className="card-nav-mobile-content">
+      {userDashboardBtn}
+    </div>
+  ) : undefined;
+
   const rightContent = (
     <>
+      <div className="hidden md:flex items-center gap-1">
+        {isAdminOrManager && userDashboardBtn}
+      </div>
       <div
         ref={avatarRef}
         className="flex items-center justify-center rounded-full size-8 cursor-pointer text-gray-600 hover:bg-gray-100"
@@ -171,6 +241,7 @@ const AppHeader: React.FC = () => {
         baseColor="#fff"
         menuColor="#333"
         rightContent={rightContent}
+        mobileContent={mobileContent}
       />
       {profileDropdownOpen && (
         <div
@@ -195,6 +266,24 @@ const AppHeader: React.FC = () => {
       <div className="h-20" />
       <NewBatchModal isOpen={newBatchOpen} onClose={() => setNewBatchOpen(false)} />
       <ProfileModal isOpen={profileOpen} onClose={() => setProfileOpen(false)} />
+      <RaiseIssueModal isOpen={raiseIssueOpen} onClose={() => setRaiseIssueOpen(false)} />
+
+      {isAdmin && !isOnUserRoute && (
+        <button
+          onClick={() => setShowIssuesPanel(true)}
+          className="fixed bottom-6 right-6 z-50 w-12 h-12 rounded-full bg-primary text-white shadow-lg hover:opacity-90 hover:shadow-xl transition-all flex items-center justify-center"
+          title="View Issues"
+        >
+          <HelpCircle size={22} />
+          {openIssuesCount > 0 && (
+            <span className="absolute -top-1 -right-1 min-w-[20px] h-5 flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold px-1 border-2 border-white dark:border-gray-950">
+              {openIssuesCount > 99 ? '99+' : openIssuesCount}
+            </span>
+          )}
+        </button>
+      )}
+
+      <AdminIssuesPanel isOpen={showIssuesPanel} onClose={() => setShowIssuesPanel(false)} />
     </>
   );
 };

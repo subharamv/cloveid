@@ -6,6 +6,7 @@ export interface DashboardStats {
     awaitingApproval: number;
     approved: number;
     sentForPrinting: number;
+    collected: number;
 }
 
 export interface BatchCardStats {
@@ -21,10 +22,27 @@ export const useDashboardStats = () => {
         inEditing: 0,
         awaitingApproval: 0,
         approved: 0,
-        sentForPrinting: 0
+        sentForPrinting: 0,
+        collected: 0
     });
 
     const [batchCardStats, setBatchCardStats] = useState<BatchCardStats>({
+        printed: 0,
+        readyToCollect: 0,
+        sentForPrinting: 0,
+        pending: 0,
+        collected: 0
+    });
+
+    const [singleCardStats, setSingleCardStats] = useState<BatchCardStats>({
+        printed: 0,
+        readyToCollect: 0,
+        sentForPrinting: 0,
+        pending: 0,
+        collected: 0
+    });
+
+    const [bulkCardStats, setBulkCardStats] = useState<BatchCardStats>({
         printed: 0,
         readyToCollect: 0,
         sentForPrinting: 0,
@@ -77,22 +95,22 @@ export const useDashboardStats = () => {
                 idCardsCount: (idCardsData || []).length
             });
 
-            // Calculate request stats - categorize all requests by their workflow state
+            // Calculate request stats from requests table only (employee card requests)
             const initialStats = {
                 inEditing: 0,
                 awaitingApproval: 0,
                 approved: 0,
-                sentForPrinting: 0
+                sentForPrinting: 0,
+                collected: 0
             };
 
             const calculatedStats = (requestsData || []).reduce((acc, req) => {
-                // Exclude collected cards from stats
                 if (req.print_status === 'collected') {
+                    acc.collected++;
                     return acc;
                 }
 
                 // Categorize by status and edited flag
-                // Priority: status field takes precedence
                 if (req.status === 'Pending' && req.is_edited === false) {
                     acc.inEditing++;
                 } else if (req.status === 'Pending' && req.is_edited === true) {
@@ -104,10 +122,8 @@ export const useDashboardStats = () => {
                 } else if (req.print_status === 'sent_for_printing') {
                     acc.sentForPrinting++;
                 } else if (req.print_status === 'ready_to_collect' || req.print_status === 'printed' || req.print_status === 'completed') {
-                    // Cards in these states should already be approved/printed, count as sent for printing
                     acc.sentForPrinting++;
                 } else if (!req.status || req.status === '' || req.status === 'Draft') {
-                    // Default uncategorized to inEditing
                     acc.inEditing++;
                 }
                 return acc;
@@ -117,23 +133,14 @@ export const useDashboardStats = () => {
 
             console.log('Dashboard stats - Calculated request stats:', calculatedStats);
 
-            // Calculate batch card statistics using exact count queries per table to ensure accuracy
-            // This aggregates counts across requests, card_details and id_cards and excludes collected cards
+            // Calculate per-table card statistics
             try {
-                const tables = ['requests', 'card_details', 'id_cards'];
-                let totalNonCollected = 0;
-                let readyCount = 0;
-                let printedCount = 0;
-                let sentCount = 0;
-                let collectedCount = 0;
-
-                await Promise.all(tables.map(async (table) => {
+                const queryTable = async (table: string) => {
                     try {
                         const totalRes = await supabase.from(table).select('id', { count: 'exact' }).not('print_status', 'eq', 'collected');
                         const readyRes = await supabase.from(table).select('id', { count: 'exact' }).eq('print_status', 'ready_to_collect');
                         const printedRes = await supabase.from(table).select('id', { count: 'exact' }).in('print_status', ['completed', 'printed']);
                         const sentRes = await supabase.from(table).select('id', { count: 'exact' }).eq('print_status', 'sent_for_printing');
-
                         const collectedRes = await supabase.from(table).select('id', { count: 'exact' }).eq('print_status', 'collected');
 
                         if (totalRes.error) console.warn(`counts: failed total for ${table}:`, totalRes.error.message);
@@ -142,30 +149,36 @@ export const useDashboardStats = () => {
                         if (sentRes.error) console.warn(`counts: failed sent for ${table}:`, sentRes.error.message);
                         if (collectedRes.error) console.warn(`counts: failed collected for ${table}:`, collectedRes.error.message);
 
-                        totalNonCollected += (totalRes.count || 0);
-                        readyCount += (readyRes.count || 0);
-                        printedCount += (printedRes.count || 0);
-                        sentCount += (sentRes.count || 0);
-                        collectedCount += (collectedRes.count || 0);
+                        const total = totalRes.count || 0;
+                        const ready = readyRes.count || 0;
+                        const printed = printedRes.count || 0;
+                        const sent = sentRes.count || 0;
+                        const collected = collectedRes.count || 0;
+                        const pending = Math.max(0, total - (ready + printed + sent));
+
+                        return { printed, readyToCollect: ready, sentForPrinting: sent, pending, collected };
                     } catch (e) {
                         console.error('Error counting table', table, e);
+                        return { printed: 0, readyToCollect: 0, sentForPrinting: 0, pending: 0, collected: 0 };
                     }
-                }));
-
-                const pendingCount = Math.max(0, totalNonCollected - (readyCount + printedCount + sentCount));
-
-                const batchCardStatistics = {
-                    printed: printedCount,
-                    readyToCollect: readyCount,
-                    sentForPrinting: sentCount,
-                    pending: pendingCount,
-                    collected: collectedCount
                 };
 
-                setBatchCardStats(batchCardStatistics);
-                console.log('Dashboard stats - Final batch card statistics (counts):', batchCardStatistics, { totalNonCollected, readyCount, printedCount, sentCount });
+                const [cardDetailsStats, idCardsStats] = await Promise.all([
+                    queryTable('card_details'),
+                    queryTable('id_cards'),
+                ]);
+
+                setSingleCardStats(cardDetailsStats);
+                setBulkCardStats(idCardsStats);
+                setBatchCardStats({
+                    printed: cardDetailsStats.printed + idCardsStats.printed,
+                    readyToCollect: cardDetailsStats.readyToCollect + idCardsStats.readyToCollect,
+                    sentForPrinting: cardDetailsStats.sentForPrinting + idCardsStats.sentForPrinting,
+                    pending: cardDetailsStats.pending + idCardsStats.pending,
+                    collected: cardDetailsStats.collected + idCardsStats.collected,
+                });
             } catch (e) {
-                console.error('Error computing batch card statistics via counts:', e);
+                console.error('Error computing batch card statistics:', e);
             }
 
         } catch (err) {
@@ -216,6 +229,8 @@ export const useDashboardStats = () => {
     return {
         stats,
         batchCardStats,
+        singleCardStats,
+        bulkCardStats,
         loading,
         error,
         refetch: fetchStats

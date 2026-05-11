@@ -21,10 +21,10 @@ interface Request {
 interface ViewRequestModalProps {
     request: Request | null;
     onClose: () => void;
-    onApprove: (id: number) => void;
-    onReject: (id: number) => void;
-    onEdit?: (id: number) => void; // Make onEdit optional
-    isVendorView?: boolean; // Add prop to indicate vendor view
+    onApprove?: (id: number) => void;
+    onReject?: (id: number) => void;
+    onEdit?: (id: number) => void;
+    isVendorView?: boolean;
     frontLogoSrc?: string;
     backLogoSrc?: string;
 }
@@ -96,19 +96,19 @@ const ViewRequestModal: React.FC<ViewRequestModalProps> = ({ request, onClose, o
                 </div>
                 <div className="flex justify-end gap-4">
                     <button onClick={onClose} className="bg-gray-500 text-white px-4 py-2 rounded-md">Close</button>
-                    {!isVendorView && (
+                    {!isVendorView && onApprove && (
                         <button onClick={() => onApprove(request.id)} disabled={isApproved} className="bg-green-500 text-white px-4 py-2 rounded-md disabled:bg-gray-400">Approve</button>
                     )}
                     {onEdit && !isVendorView && (
                         <button onClick={() => onEdit(request.id)} className="bg-blue-500 text-white px-4 py-2 rounded-md">Edit</button>
                     )}
-                    {!isVendorView && (
+                    {!isVendorView && onReject && (
                         <button onClick={() => onReject(request.id)} disabled={isApproved} className="bg-red-500 text-white px-4 py-2 rounded-md disabled:bg-gray-400">Reject</button>
                     )}
-                    {isVendorView && (
+                    {isVendorView && onApprove && (
                         <>
                             <button onClick={() => onApprove(request.id)} disabled={isApproved} className="bg-green-500 text-white px-4 py-2 rounded-md disabled:bg-gray-400">Accept</button>
-                            <button onClick={() => onReject(request.id)} disabled={isApproved} className="bg-red-500 text-white px-4 py-2 rounded-md disabled:bg-gray-400">Reject</button>
+                            <button onClick={() => onReject?.(request.id)} disabled={isApproved} className="bg-red-500 text-white px-4 py-2 rounded-md disabled:bg-gray-400">Reject</button>
                         </>
                     )}
                 </div>

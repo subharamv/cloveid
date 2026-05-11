@@ -5,7 +5,8 @@ import { toast } from 'sonner';
 import AppHeader from '../components/AppHeader';
 import {
     Pencil, Trash2, Plus, X, Check, ChevronDown, ChevronRight, Building2,
-    Mail, MapPin, Eye, Search, RefreshCw, MoreHorizontal, Filter
+    Mail, MapPin, Eye, Search, RefreshCw, MoreHorizontal, Filter,
+    Send, CheckCircle2, AlertCircle, PackageCheck, Clock
 } from 'lucide-react';
 import {
     DropdownMenu,
@@ -32,6 +33,7 @@ interface VendorRequest {
     batch_id: string | null;
     id_card_id: number | null;
     vendor_name?: string;
+    card_details?: any;
 }
 
 const VendorManagement = () => {
@@ -50,8 +52,10 @@ const VendorManagement = () => {
 
     const [searchQuery, setSearchQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
+    const [departmentFilter, setDepartmentFilter] = useState('all');
     const [page, setPage] = useState(1);
     const [perPage, setPerPage] = useState(PAGE_SIZES[0]);
+    const [expandedRowId, setExpandedRowId] = useState<number | null>(null);
 
     useEffect(() => {
         fetchVendors();
@@ -277,21 +281,79 @@ const VendorManagement = () => {
         );
     };
 
+    const uniqueDepartments = useMemo(() => {
+        const deps = new Set<string>();
+        vendorRequests.forEach(r => {
+            const branch = r.card_details?.branch;
+            if (!branch) return;
+            if (typeof branch === 'string') deps.add(branch);
+            else if (typeof branch === 'object') {
+                const name = branch?.name;
+                if (name && typeof name === 'string') deps.add(name);
+            }
+        });
+        return Array.from(deps).sort();
+    }, [vendorRequests]);
+
+    const statsData = [
+        { label: 'Sent', key: 'sent', icon: Send, color: 'from-blue-400 to-blue-600', count: vendorRequests.filter(r => r.status === 'sent').length },
+        { label: 'Accepted', key: 'accepted', icon: CheckCircle2, color: 'from-indigo-400 to-indigo-600', count: vendorRequests.filter(r => r.status === 'accepted').length },
+        { label: 'Rejected', key: 'rejected', icon: AlertCircle, color: 'from-red-400 to-red-600', count: vendorRequests.filter(r => r.status === 'rejected').length },
+        { label: 'Completed', key: 'completed', icon: PackageCheck, color: 'from-green-400 to-green-600', count: vendorRequests.filter(r => r.status === 'completed').length },
+    ];
+
+    useEffect(() => {
+        if (!searchQuery.trim()) {
+            setExpandedRowId(null);
+            return;
+        }
+        const q = searchQuery.toLowerCase();
+        const match = vendorRequests.find(r => {
+            if (r.batch_id?.toLowerCase().includes(q) ||
+                r.vendor_name?.toLowerCase().includes(q) ||
+                r.status?.toLowerCase().includes(q)) return true;
+            if (r.card_details) {
+                const cd = r.card_details;
+                const searchable = [cd.fullName, cd.employeeId, cd.bloodGroup, cd.emergencyContact];
+                if (typeof cd.branch === 'string') searchable.push(cd.branch);
+                return searchable.some(f => typeof f === 'string' && f.toLowerCase().includes(q));
+            }
+            return false;
+        });
+        if (match) setExpandedRowId(match.id);
+    }, [searchQuery, vendorRequests]);
+
     const filteredRequests = useMemo(() => {
         let result = [...vendorRequests];
         if (searchQuery.trim()) {
             const q = searchQuery.toLowerCase();
-            result = result.filter(r =>
-                r.batch_id?.toLowerCase().includes(q) ||
-                r.vendor_name?.toLowerCase().includes(q) ||
-                r.status?.toLowerCase().includes(q)
-            );
+            result = result.filter(r => {
+                if (r.batch_id?.toLowerCase().includes(q) ||
+                    r.vendor_name?.toLowerCase().includes(q) ||
+                    r.status?.toLowerCase().includes(q)) return true;
+                if (r.card_details) {
+                    const cd = r.card_details;
+                    const searchable = [cd.fullName, cd.employeeId, cd.bloodGroup, cd.emergencyContact];
+                    if (typeof cd.branch === 'string') searchable.push(cd.branch);
+                    return searchable.some(f => typeof f === 'string' && f.toLowerCase().includes(q));
+                }
+                return false;
+            });
         }
         if (statusFilter !== 'all') {
             result = result.filter(r => r.status === statusFilter);
         }
+        if (departmentFilter !== 'all') {
+            result = result.filter(r => {
+                const branch = r.card_details?.branch;
+                if (!branch) return false;
+                if (typeof branch === 'string') return branch === departmentFilter;
+                if (typeof branch === 'object') return branch?.name === departmentFilter;
+                return false;
+            });
+        }
         return result;
-    }, [vendorRequests, searchQuery, statusFilter]);
+    }, [vendorRequests, searchQuery, statusFilter, departmentFilter]);
 
     const totalPages = Math.max(1, Math.ceil(filteredRequests.length / perPage));
     const safePage = Math.min(page, totalPages);
@@ -517,8 +579,50 @@ const VendorManagement = () => {
                                         <option value="completed">Completed</option>
                                     </select>
                                 </div>
+                                {uniqueDepartments.length > 0 && (
+                                    <div className="relative">
+                                        <Building2 size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                                        <select
+                                            value={departmentFilter}
+                                            onChange={(e) => { setDepartmentFilter(e.target.value); setPage(1); }}
+                                            className="w-full sm:w-44 pl-9 pr-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all appearance-none"
+                                        >
+                                            <option value="all">All Departments</option>
+                                            {uniqueDepartments.map(dep => (
+                                                <option key={dep} value={dep}>{dep}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                )}
                             </div>
                         </div>
+                    </div>
+
+                    {/* Stat Cards */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+                        {statsData.map(stat => {
+                            const Icon = stat.icon;
+                            return (
+                                <button
+                                    key={stat.key}
+                                    onClick={() => setStatusFilter(stat.key === statusFilter ? 'all' : stat.key)}
+                                    className={`group bg-white dark:bg-gray-800/80 rounded-xl border p-4 hover:shadow-md transition-all text-left ${
+                                        statusFilter === stat.key
+                                            ? 'border-primary dark:border-primary ring-1 ring-primary/20'
+                                            : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                                    }`}
+                                >
+                                    <div className="flex items-center justify-between mb-3">
+                                        <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${stat.color} flex items-center justify-center shadow-sm`}>
+                                            <Icon size={16} className="text-white" />
+                                        </div>
+                                        <ChevronRight size={14} className="text-gray-300 dark:text-gray-600 group-hover:translate-x-0.5 transition-transform" />
+                                    </div>
+                                    <p className="text-2xl font-bold text-foreground">{stat.count}</p>
+                                    <p className="text-xs text-muted-foreground mt-0.5">{stat.label}</p>
+                                </button>
+                            );
+                        })}
                     </div>
 
                     {/* Desktop Table */}
@@ -526,6 +630,7 @@ const VendorManagement = () => {
                         <table className="w-full">
                             <thead>
                                 <tr className="bg-gray-50 dark:bg-gray-900/50">
+                                    <th className="py-3.5 px-2 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider w-8"></th>
                                     <th className="py-3.5 px-5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Batch ID</th>
                                     <th className="py-3.5 px-5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Vendor</th>
                                     <th className="py-3.5 px-5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Status</th>
@@ -536,12 +641,23 @@ const VendorManagement = () => {
                             <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                                 {paginatedRequests.length === 0 ? (
                                     <tr>
-                                        <td colSpan={5} className="py-12 text-center text-sm text-muted-foreground">
+                                        <td colSpan={6} className="py-12 text-center text-sm text-muted-foreground">
                                             {searchQuery || statusFilter !== 'all' ? 'No requests match your filters.' : 'No vendor requests found.'}
                                         </td>
                                     </tr>
                                 ) : paginatedRequests.map((request) => (
-                                    <tr key={request.id} className="hover:bg-gray-50 dark:hover:bg-gray-900/30 transition-colors">
+                                    <React.Fragment key={request.id}>
+                                    <tr className="hover:bg-gray-50 dark:hover:bg-gray-900/30 transition-colors">
+                                        <td className="py-4 px-2 text-sm">
+                                            {request.card_details && (
+                                                <button
+                                                    onClick={() => setExpandedRowId(expandedRowId === request.id ? null : request.id)}
+                                                    className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
+                                                >
+                                                    {expandedRowId === request.id ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                                                </button>
+                                            )}
+                                        </td>
                                         <td className="py-4 px-5 text-sm font-mono text-foreground">{request.batch_id || 'N/A'}</td>
                                         <td className="py-4 px-5 text-sm text-foreground">{request.vendor_name}</td>
                                         <td className="py-4 px-5">
@@ -567,6 +683,45 @@ const VendorManagement = () => {
                                             </div>
                                         </td>
                                     </tr>
+                                    {expandedRowId === request.id && request.card_details && (
+                                        <tr className="bg-gray-50/50 dark:bg-gray-900/20">
+                                            <td colSpan={6} className="px-5 py-4">
+                                                <div className="flex gap-4">
+                                                    {request.card_details.photo && (
+                                                        <img
+                                                            src={request.card_details.photo}
+                                                            alt=""
+                                                            className="w-16 h-20 object-cover rounded-lg border border-gray-200 dark:border-gray-700 shrink-0"
+                                                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                                                        />
+                                                    )}
+                                                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-2 text-sm flex-1">
+                                                        <div>
+                                                            <span className="text-muted-foreground text-xs">Name</span>
+                                                            <p className="font-medium text-foreground">{request.card_details.fullName || '-'}</p>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-muted-foreground text-xs">Employee ID</span>
+                                                            <p className="font-medium text-foreground">{request.card_details.employeeId || '-'}</p>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-muted-foreground text-xs">Blood Group</span>
+                                                            <p className="font-medium text-foreground">{request.card_details.bloodGroup || '-'}</p>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-muted-foreground text-xs">Branch</span>
+                                                            <p className="font-medium text-foreground">{typeof request.card_details.branch === 'object' ? request.card_details.branch?.name || '-' : request.card_details.branch || '-'}</p>
+                                                        </div>
+                                                        <div className="sm:col-span-2">
+                                                            <span className="text-muted-foreground text-xs">Emergency Contact</span>
+                                                            <p className="font-medium text-foreground">{request.card_details.emergencyContact || '-'}</p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    )}
+                                    </React.Fragment>
                                 ))}
                             </tbody>
                         </table>
@@ -581,13 +736,59 @@ const VendorManagement = () => {
                         ) : paginatedRequests.map((request) => (
                             <div key={request.id} className="p-4 space-y-2">
                                 <div className="flex items-start justify-between">
-                                    <div className="min-w-0">
-                                        <p className="text-xs font-mono text-muted-foreground">Batch: {request.batch_id || 'N/A'}</p>
+                                    <div className="min-w-0 flex-1">
+                                        <div className="flex items-center gap-1">
+                                            {request.card_details && (
+                                                <button
+                                                    onClick={() => setExpandedRowId(expandedRowId === request.id ? null : request.id)}
+                                                    className="p-0.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors shrink-0"
+                                                >
+                                                    {expandedRowId === request.id ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                                                </button>
+                                            )}
+                                            <p className="text-xs font-mono text-muted-foreground">Batch: {request.batch_id || 'N/A'}</p>
+                                        </div>
                                         <p className="text-sm font-medium text-foreground mt-0.5 truncate">{request.vendor_name}</p>
                                     </div>
                                     <StatusBadge status={request.status} />
                                 </div>
                                 <p className="text-xs text-muted-foreground">Created: {new Date(request.created_at).toLocaleDateString()}</p>
+                                {expandedRowId === request.id && request.card_details && (
+                                    <div className="mt-2 p-3 bg-gray-50 dark:bg-gray-900/30 rounded-lg space-y-2">
+                                        <div className="flex gap-3">
+                                            {request.card_details.photo && (
+                                                <img
+                                                    src={request.card_details.photo}
+                                                    alt=""
+                                                    className="w-12 h-16 object-cover rounded-lg border border-gray-200 dark:border-gray-700 shrink-0"
+                                                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                                                />
+                                            )}
+                                            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm flex-1">
+                                                <div>
+                                                    <span className="text-muted-foreground text-xs">Name</span>
+                                                    <p className="font-medium text-foreground">{request.card_details.fullName || '-'}</p>
+                                                </div>
+                                                <div>
+                                                    <span className="text-muted-foreground text-xs">Employee ID</span>
+                                                    <p className="font-medium text-foreground">{request.card_details.employeeId || '-'}</p>
+                                                </div>
+                                                <div>
+                                                    <span className="text-muted-foreground text-xs">Blood Group</span>
+                                                    <p className="font-medium text-foreground">{request.card_details.bloodGroup || '-'}</p>
+                                                </div>
+                                                <div>
+                                                    <span className="text-muted-foreground text-xs">Branch</span>
+                                                    <p className="font-medium text-foreground">{typeof request.card_details.branch === 'object' ? request.card_details.branch?.name || '-' : request.card_details.branch || '-'}</p>
+                                                </div>
+                                                <div className="col-span-2">
+                                                    <span className="text-muted-foreground text-xs">Emergency Contact</span>
+                                                    <p className="font-medium text-foreground">{request.card_details.emergencyContact || '-'}</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
                                 <div className="flex gap-2 pt-1">
                                     <button
                                         onClick={() => setChangingVendorRequest(request)}

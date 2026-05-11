@@ -1,5 +1,5 @@
 import React from 'react';
-import { Download, FileText, RefreshCcw, Printer, Image, Archive, FileType, Save } from 'lucide-react';
+import { Download, FileText, RefreshCcw, Printer, Image, Archive, FileType, Save, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Employee } from '@/types/employee';
@@ -19,6 +19,7 @@ interface ActionButtonsProps {
   onDownloadZip: () => void;
   onReset: () => void;
   onSave?: () => void;
+  onCancel?: () => void;
   isPhotoUploaded: boolean;
   setIsSidebarOpen: (isOpen: boolean) => void;
 }
@@ -31,6 +32,7 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
   onDownloadZip,
   onReset,
   onSave,
+  onCancel,
   isPhotoUploaded,
   setIsSidebarOpen
 }) => {
@@ -115,6 +117,16 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
           <RefreshCcw className="w-4 h-4 mr-2" />
           Reset
         </Button>
+        {onCancel && (
+          <Button
+            onClick={onCancel}
+            variant="outline"
+            className="w-full col-span-2 mt-3 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+          >
+            <X className="w-4 h-4 mr-2" />
+            Cancel
+          </Button>
+        )}
       </div>
 
       <div className="mt-6 text-xs text-muted-foreground space-y-1">

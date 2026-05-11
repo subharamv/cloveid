@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabaseClient';
 import { useBranding } from '@/hooks/useBranding';
 import { useBranches } from '@/hooks/useBranches';
 import AppHeader from '../components/AppHeader';
 import { toast } from 'sonner';
-import { Loader2, Save, Eye, EyeOff, Move, X, Layers, Grid, RefreshCw, ZoomIn, ZoomOut, MousePointer2, Grid3X3, Crosshair } from 'lucide-react';
+import { Loader2, Save, Eye, EyeOff, Move, X, Layers, Grid, RefreshCw, ZoomIn, ZoomOut, MousePointer2, Grid3X3, Crosshair, ArrowLeft } from 'lucide-react';
 
 export interface CardElementPosition {
     x: number;
@@ -33,6 +34,7 @@ export interface CardLayoutElement {
 }
 
 const CardCanvasEditor: React.FC = () => {
+    const navigate = useNavigate();
     const { branding } = useBranding();
     const { branches } = useBranches();
     
@@ -1032,11 +1034,15 @@ const CardCanvasEditor: React.FC = () => {
             <AppHeader />
             <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 lg:py-10">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-                    <div>
+                    <div className="flex items-center gap-3">
+                        <button
+                            onClick={() => navigate('/settings/branding')}
+                            className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+                        >
+                            <ArrowLeft size={18} />
+                            <span className="hidden md:inline">Back</span>
+                        </button>
                         <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">Card Canvas Editor</h1>
-                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                            Drag elements to position - Scroll to zoom - Click empty area to pan - Preview shows sample employee
-                        </p>
                     </div>
                     <div className="flex gap-2 flex-wrap">
                         {/* Undo/Redo */}

@@ -26,8 +26,11 @@ import VendorDashboard from './pages/VendorDashboard';
 import BatchManagement from './pages/BatchManagement';
 import BrandingSettings from './pages/BrandingSettings';
 import StorageManagement from './pages/StorageManagement';
+import DriveStorageManagement from './pages/DriveStorageManagement';
 import CardCanvasEditor from './pages/CardCanvasEditor';
+import SingleCardTracking from './pages/SingleCardTracking';
 import ResetPassword from './pages/ResetPassword';
+import AdminIssues from './pages/AdminIssues';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { AuthProvider } from './hooks/useAuth';
 
@@ -60,9 +63,12 @@ const App = () => (
               <Route path="/vendor" element={<Vendor />} />
               <Route path="/user-management" element={<UserManagement />} />
               <Route path="/issued-cards" element={<IssuedCards />} />
+              <Route path="/single-card-tracking" element={<SingleCardTracking />} />
               <Route path="/settings/branding" element={<BrandingSettings />} />
               <Route path="/settings/card-editor" element={<CardCanvasEditor />} />
               <Route path="/settings/storage" element={<StorageManagement />} />
+              <Route path="/settings/drive-storage" element={<DriveStorageManagement />} />
+              <Route path="/admin-issues" element={<AdminIssues />} />
             </Route>
 
             {/* User Protected Routes */}

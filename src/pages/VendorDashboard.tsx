@@ -1,21 +1,30 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../hooks/useAuth';
 import ViewRequestModal from '../components/ViewRequestModal';
 import { toast } from 'sonner';
 import JSZip from 'jszip';
 import html2canvas from 'html2canvas';
-import { Download, XCircle, Eye, Check, Inbox, Archive, Search, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Download, XCircle, Eye, Check, Inbox, Archive, Search, ChevronLeft, ChevronRight, LayoutDashboard, ClipboardList, CheckCircle2, AlertCircle, Sun, CloudSun, Moon } from 'lucide-react';
 import { HiddenCardRenderer } from '../components/HiddenCardRenderer';
 import { imageToDataUrl } from '@/lib/utils';
 import cloveLogo from '@/assets/CLOVE LOGO BLACK.png';
 import backLogoSvg from '@/assets/logo svg.png';
 import { jsPDF } from 'jspdf';
 import AppHeader from '../components/AppHeader';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
+
+function getGreeting(): { text: string; icon: typeof Sun } {
+    const hour = new Date().getHours();
+    if (hour >= 5 && hour < 12) return { text: 'Good Morning', icon: Sun };
+    if (hour >= 12 && hour < 17) return { text: 'Good Afternoon', icon: CloudSun };
+    if (hour >= 17 && hour < 21) return { text: 'Good Evening', icon: CloudSun };
+    return { text: 'Good Night', icon: Moon };
+}
 
 const VendorDashboard = () => {
     const { user, userRole, loading: authLoading } = useAuth();
+    const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const tabParam = searchParams.get('tab');
     const activeTab: 'active' | 'completed' = tabParam === 'completed' ? 'completed' : 'active';
@@ -409,6 +418,12 @@ const VendorDashboard = () => {
         setPage(1);
     }, [searchQuery, dateFilter, customDateStart, customDateEnd, activeTab]);
 
+    const stats = useMemo(() => ({
+        active: requests.filter(r => r.vendor_status !== 'completed').length,
+        completed: requests.filter(r => r.vendor_status === 'completed').length,
+        rejected: requests.filter(r => r.vendor_status === 'rejected').length,
+    }), [requests]);
+
     const getDateRange = () => {
         const now = new Date();
         const start = new Date(now);
@@ -497,6 +512,94 @@ const VendorDashboard = () => {
                         </div>
                     ) : (
                         <>
+                            {/* Welcome + Greeting */}
+                            <div className="flex items-center gap-2 mb-6">
+                                {(() => {
+                                    const { text, icon: GreetIcon } = getGreeting();
+                                    return (
+                                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-orange-500 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 px-2.5 py-0.5 rounded-full">
+                                            <GreetIcon size={12} />
+                                            {text}
+                                        </span>
+                                    );
+                                })()}
+                                <span className="text-sm text-gray-500 dark:text-gray-400">
+                                    Welcome back, {user?.user_metadata?.full_name || user?.email || 'Vendor'}!
+                                </span>
+                            </div>
+
+                            {/* Stat Cards */}
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+                                <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm p-4 flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center shrink-0">
+                                        <ClipboardList size={20} className="text-blue-600 dark:text-blue-400" />
+                                    </div>
+                                    <div>
+                                        <p className="text-2xl font-bold text-foreground">{stats.active}</p>
+                                        <p className="text-xs text-muted-foreground">Active Requests</p>
+                                    </div>
+                                </div>
+                                <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm p-4 flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-lg bg-green-100 dark:bg-green-900/30 flex items-center justify-center shrink-0">
+                                        <CheckCircle2 size={20} className="text-green-600 dark:text-green-400" />
+                                    </div>
+                                    <div>
+                                        <p className="text-2xl font-bold text-foreground">{stats.completed}</p>
+                                        <p className="text-xs text-muted-foreground">Completed</p>
+                                    </div>
+                                </div>
+                                <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm p-4 flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center shrink-0">
+                                        <AlertCircle size={20} className="text-red-600 dark:text-red-400" />
+                                    </div>
+                                    <div>
+                                        <p className="text-2xl font-bold text-foreground">{stats.rejected}</p>
+                                        <p className="text-xs text-muted-foreground">Rejected</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Tab Toggle & View All */}
+                            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
+                                <div className="flex items-center gap-1 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-1">
+                                    <button
+                                        onClick={() => navigate('/vendor-dashboard?tab=active')}
+                                        className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
+                                            activeTab === 'active'
+                                                ? 'bg-primary text-white shadow-sm'
+                                                : 'text-muted-foreground hover:text-foreground'
+                                        }`}
+                                    >
+                                        <span className="flex items-center gap-1.5">
+                                            <LayoutDashboard size={14} />
+                                            Active Cards
+                                        </span>
+                                    </button>
+                                    <button
+                                        onClick={() => navigate('/vendor-dashboard?tab=completed')}
+                                        className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
+                                            activeTab === 'completed'
+                                                ? 'bg-primary text-white shadow-sm'
+                                                : 'text-muted-foreground hover:text-foreground'
+                                        }`}
+                                    >
+                                        <span className="flex items-center gap-1.5">
+                                            <CheckCircle2 size={14} />
+                                            Completed Cards
+                                        </span>
+                                    </button>
+                                </div>
+                                {activeTab === 'completed' && (
+                                    <button
+                                        onClick={() => navigate('/vendor-dashboard?tab=active')}
+                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-primary border border-primary hover:bg-primary hover:text-white transition-all"
+                                    >
+                                        <LayoutDashboard size={14} />
+                                        View All Active
+                                    </button>
+                                )}
+                            </div>
+
                             {/* Filters */}
                             <div className="mb-4 space-y-3">
                                 <div className="flex flex-col sm:flex-row gap-3">

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Upload, FileSpreadsheet, Download, ChevronRight, Clock, CheckCircle2, AlertCircle, Loader2, ArrowRight } from 'lucide-react';
+import { Upload, FileSpreadsheet, Download, ChevronRight, Clock, CheckCircle2, AlertCircle, Loader2, ArrowRight, ArrowLeft } from 'lucide-react';
 import AppHeader from '../components/AppHeader';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -113,11 +113,19 @@ const BulkCardImport = () => {
             <AppHeader />
             <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 lg:py-10">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
-                    <div>
-                        <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">Bulk ID Card Management</h1>
-                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                            Upload a spreadsheet to create multiple ID cards at once
-                        </p>
+                    <div className="flex items-center gap-3">
+                        <button
+                            onClick={() => navigate(-1)}
+                            className="w-9 h-9 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 flex items-center justify-center text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600 transition-all shadow-sm"
+                        >
+                            <ArrowLeft size={18} />
+                        </button>
+                        <div>
+                            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">Bulk ID Card Management</h1>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                                Upload a spreadsheet to create multiple ID cards at once
+                            </p>
+                        </div>
                     </div>
                 </div>
 
@@ -223,7 +231,7 @@ const BulkCardImport = () => {
                             <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
                                 <h2 className="text-sm font-bold text-gray-900 dark:text-white">Recent Imports</h2>
                                 <button
-                                    onClick={() => navigate('/import-management')}
+                                    onClick={() => navigate('/batches')}
                                     className="text-xs font-medium text-orange-600 dark:text-orange-400 hover:underline inline-flex items-center gap-1"
                                 >
                                     View All <ChevronRight size={12} />
@@ -302,7 +310,7 @@ const BulkCardImport = () => {
                             <ArrowRight size={16} className="text-gray-300 dark:text-gray-600 group-hover:text-blue-500 transition-colors" />
                         </button>
                         <button
-                            onClick={() => navigate('/import-management')}
+                            onClick={() => navigate('/batches')}
                             className="flex items-center gap-4 p-4 rounded-xl border border-gray-200 dark:border-gray-700 hover:border-orange-300 dark:hover:border-orange-700 hover:bg-orange-50 dark:hover:bg-orange-900/10 transition-all group"
                         >
                             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center shadow-sm">

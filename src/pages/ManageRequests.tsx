@@ -11,7 +11,7 @@ import cloveLogo from '@/assets/CLOVE LOGO BLACK.png';
 import backLogoSvg from '@/assets/logo svg.png';
 import JSZip from 'jszip';
 import { toast } from 'sonner';
-import { Eye, Pencil, Download, Box, Search, ChevronRight, Edit3, Clock, CheckCircle2, Printer, Package, XCircle, Trash2, Send, Loader2 } from 'lucide-react';
+import { Eye, Pencil, Download, Box, Search, ChevronLeft, ChevronRight, Edit3, Clock, CheckCircle2, Printer, Package, XCircle, Trash2, Send, Loader2 } from 'lucide-react';
 
 import AppHeader from '../components/AppHeader';
 
@@ -57,6 +57,10 @@ const ManageRequests = () => {
     const [isDownloading, setIsDownloading] = useState(false);
     const cardContainerRef = useRef<HTMLDivElement>(null);
     const [searchQuery, setSearchQuery] = useState('');
+
+    const PAGE_SIZES = [10, 20, 50];
+    const [page, setPage] = useState(1);
+    const [perPage, setPerPage] = useState(PAGE_SIZES[0]);
 
     useEffect(() => {
         const params = new URLSearchParams(location.search);
@@ -111,16 +115,15 @@ const ManageRequests = () => {
     };
 
     const fetchRequests = async () => {
-        const [requestsRes, cardDetailsRes] = await Promise.all([
-            supabase.from('requests').select('*, is_edited, batch_id').is('batch_id', null).order('created_at', { ascending: false }),
-            supabase.from('card_details').select('*').order('created_at', { ascending: false })
-        ]);
+        const { data: requestsData, error: requestsError } = await supabase
+            .from('requests')
+            .select('*, is_edited, batch_id')
+            .is('batch_id', null)
+            .order('created_at', { ascending: false });
 
-        if (requestsRes.error) console.error('Error fetching requests:', requestsRes.error);
-        if (cardDetailsRes.error) console.error('Error fetching card_details:', cardDetailsRes.error);
+        if (requestsError) console.error('Error fetching requests:', requestsError);
 
-        const individualRequests = requestsRes.data || [];
-        const cardDetails = cardDetailsRes.data || [];
+        const individualRequests = requestsData || [];
 
         const formattedIndividual = individualRequests.map(req => ({
             id: req.id,
@@ -141,26 +144,7 @@ const ManageRequests = () => {
             sourceTable: 'requests' as const
         }));
 
-        const formattedCardDetails = cardDetails.map(req => ({
-            id: req.id,
-            name: req.full_name,
-            employeeId: req.employee_id,
-            date: new Date(req.created_at).toLocaleDateString(),
-            status: req.status,
-            is_edited: req.is_edited,
-            batch_id: null,
-            photo: req.photo_url,
-            photo_url: req.photo_url,
-            bloodGroup: req.blood_group,
-            branch: req.branch,
-            emergencyContact: req.emergency_contact,
-            created_at: req.created_at,
-            print_status: req.print_status || 'not_printed',
-            type: 'individual' as const,
-            sourceTable: 'card_details' as const
-        }));
-
-        setRequests([...formattedIndividual, ...formattedCardDetails].sort((a, b) =>
+        setRequests(formattedIndividual.sort((a, b) =>
             new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
         ));
     };
@@ -188,12 +172,22 @@ const ManageRequests = () => {
                 filtered = filtered.filter(r => r.status === 'Pending' && r.is_edited === false);
             } else if (statusFilter === 'Awaiting Approval') {
                 filtered = filtered.filter(r => r.status === 'Pending' && r.is_edited === true);
+            } else if (statusFilter === 'Collected') {
+                filtered = filtered.filter(r => r.print_status === 'collected');
             } else {
                 filtered = filtered.filter(r => r.status === statusFilter);
             }
         }
         setFilteredRequests(filtered);
     }, [statusFilter, requests, searchQuery]);
+
+    const totalPages = Math.max(1, Math.ceil(filteredRequests.length / perPage));
+    const safePage = Math.min(page, totalPages);
+    const paginatedRequests = filteredRequests.slice((safePage - 1) * perPage, safePage * perPage);
+
+    useEffect(() => {
+        if (page > totalPages) setPage(totalPages);
+    }, [page, totalPages]);
 
     const getDisplayStatus = (request: Request) => {
         if (request.print_status === 'collected') return 'Collected';
@@ -644,8 +638,12 @@ const ManageRequests = () => {
         <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-950 dark:to-gray-900">
             <AppHeader />
             <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 lg:py-10">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
-                    <div>
+                <div className="flex items-center gap-4 mb-8">
+                    <button onClick={() => navigate(-1)}
+                        className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors">
+                        <ChevronLeft size={18} /> <span className="hidden md:inline">Back</span>
+                    </button>
+                    <div className="flex-1">
                         <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">Manage Employee Requests</h1>
                         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                             Review, approve, and manage ID card requests
@@ -756,13 +754,14 @@ const ManageRequests = () => {
                                     <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Employee Name</th>
                                     <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Employee ID</th>
                                     <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Date Submitted</th>
+                                    <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Source</th>
                                     <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
                                     <th className="px-5 py-3.5 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                                {filteredRequests.length > 0 ? (
-                                    filteredRequests.map((request) => (
+                                {paginatedRequests.length > 0 ? (
+                                    paginatedRequests.map((request) => (
                                         <tr key={request.id} className="hover:bg-gray-50 dark:hover:bg-gray-900/20 transition-colors">
                                             <td className="px-5 py-4">
                                                 <input
@@ -787,6 +786,15 @@ const ManageRequests = () => {
                                             </td>
                                             <td className="px-5 py-4 text-sm text-gray-500 dark:text-gray-400">
                                                 {request.date}
+                                            </td>
+                                            <td className="px-5 py-4">
+                                                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                                    request.sourceTable === 'card_details'
+                                                        ? 'bg-purple-50 text-purple-700 border border-purple-200 dark:bg-purple-900/20 dark:text-purple-400 dark:border-purple-800'
+                                                        : 'bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800'
+                                                }`}>
+                                                    {request.sourceTable === 'card_details' ? 'Single Card' : 'Employee Request'}
+                                                </span>
                                             </td>
                                             <td className="px-5 py-4">
                                                 {getStatusBadge(request)}
@@ -826,7 +834,7 @@ const ManageRequests = () => {
                                     ))
                                 ) : (
                                     <tr>
-                                        <td colSpan={6} className="px-5 py-12 text-center text-sm text-gray-400">
+                                        <td colSpan={7} className="px-5 py-12 text-center text-sm text-gray-400">
                                             {searchQuery ? 'No requests match your search.' : 'No requests found.'}
                                         </td>
                                     </tr>
@@ -837,8 +845,8 @@ const ManageRequests = () => {
 
                     {/* Mobile Cards */}
                     <div className="md:hidden divide-y divide-gray-100 dark:divide-gray-700">
-                        {filteredRequests.length > 0 ? (
-                            filteredRequests.map((request) => (
+                        {paginatedRequests.length > 0 ? (
+                            paginatedRequests.map((request) => (
                                 <div key={request.id} className="p-4">
                                     <div className="flex items-start gap-3 mb-3">
                                         <input
@@ -851,7 +859,16 @@ const ManageRequests = () => {
                                             <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">{request.name}</p>
                                             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{request.employeeId}</p>
                                         </div>
-                                        {getStatusBadge(request)}
+                                        <div className="flex flex-col items-end gap-1.5">
+                                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium ${
+                                                request.sourceTable === 'card_details'
+                                                    ? 'bg-purple-50 text-purple-700 border border-purple-200 dark:bg-purple-900/20 dark:text-purple-400 dark:border-purple-800'
+                                                    : 'bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800'
+                                            }`}>
+                                                {request.sourceTable === 'card_details' ? 'Single Card' : 'Employee Request'}
+                                            </span>
+                                            {getStatusBadge(request)}
+                                        </div>
                                     </div>
                                     <div className="grid grid-cols-2 gap-2 mb-3 text-xs text-gray-500 dark:text-gray-400">
                                         <div>
@@ -933,13 +950,63 @@ const ManageRequests = () => {
                                 </p>
                             </div>
                         )}
-                        {filteredRequests.length > 0 && (
+                        {paginatedRequests.length > 0 && (
                             <div className="px-5 py-3 border-t border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/20">
                                 <p className="text-xs text-gray-500 dark:text-gray-400">
                                     Showing {filteredRequests.length} of {requests.length} requests
                                 </p>
                             </div>
                         )}
+                    </div>
+
+                    {/* Pagination */}
+                    <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-4 border-t border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/20">
+                        <div className="flex items-center gap-2">
+                            <label className="text-sm text-gray-600 dark:text-gray-400">Rows:</label>
+                            <select
+                                value={perPage}
+                                onChange={e => { setPerPage(Number(e.target.value)); setPage(1); }}
+                                className="px-2 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm"
+                            >
+                                {PAGE_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+                            </select>
+                        </div>
+
+                        <div className="flex items-center gap-1">
+                            <button
+                                onClick={() => setPage(1)}
+                                disabled={safePage <= 1}
+                                className="px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-sm disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-700"
+                            >
+                                &#171;
+                            </button>
+                            <button
+                                onClick={() => setPage(p => Math.max(1, p - 1))}
+                                disabled={safePage <= 1}
+                                className="px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-sm disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-700"
+                            >
+                                &#8249;
+                            </button>
+
+                            <span className="px-4 py-1.5 text-sm text-gray-700 dark:text-gray-300">
+                                Page {safePage} of {totalPages}
+                            </span>
+
+                            <button
+                                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                                disabled={safePage >= totalPages}
+                                className="px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-sm disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-700"
+                            >
+                                &#8250;
+                            </button>
+                            <button
+                                onClick={() => setPage(totalPages)}
+                                disabled={safePage >= totalPages}
+                                className="px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-sm disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-700"
+                            >
+                                &#187;
+                            </button>
+                        </div>
                     </div>
                 </div>
             </main>

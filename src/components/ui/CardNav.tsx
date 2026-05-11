@@ -27,6 +27,7 @@ export interface CardNavProps {
   baseColor?: string;
   menuColor?: string;
   rightContent?: React.ReactNode;
+  mobileContent?: React.ReactNode;
 }
 
 const CardNav: React.FC<CardNavProps> = ({
@@ -37,7 +38,8 @@ const CardNav: React.FC<CardNavProps> = ({
   ease = 'power3.out',
   baseColor = '#fff',
   menuColor,
-  rightContent
+  rightContent,
+  mobileContent
 }) => {
   const [isHamburgerOpen, setIsHamburgerOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -194,7 +196,7 @@ const CardNav: React.FC<CardNavProps> = ({
             <div className="hamburger-line" />
           </div>
 
-          <div className="logo-container">
+          <div className="logo-container" onClick={() => navigate('/dashboard')} style={{ cursor: 'pointer' }}>
             <img src={logo} alt={logoAlt} className="logo" />
           </div>
 
@@ -228,6 +230,11 @@ const CardNav: React.FC<CardNavProps> = ({
               </div>
             </div>
           ))}
+          {mobileContent && (
+            <div className="card-nav-mobile">
+              {mobileContent}
+            </div>
+          )}
         </div>
       </nav>
     </div>

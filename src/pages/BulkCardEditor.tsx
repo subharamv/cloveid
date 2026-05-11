@@ -10,6 +10,7 @@ import { IDCardBack } from '@/components/IDCardBack';
 import { Modal } from '@/components/Modal';
 import { ActionButtons } from '@/components/ActionButtons';
 import { useDownloadZip } from '@/hooks/useDownloadZip';
+import { useStorageProvider } from '@/hooks/useStorageProvider';
 import logo from '@/assets/CLOVE LOGO BLACK.png';
 import { toast } from 'sonner';
 import cloveLogo from '@/assets/CLOVE LOGO BLACK.png';
@@ -28,9 +29,10 @@ import { ProgressBar } from '@/components/ProgressBar';
 const BulkCardEditor: React.FC = () => {
     const location = useLocation();
     const navigate = useNavigate();
-    const { rowData, headers, rowIndex, csvData, zipUrls, cardId, batchId, cardIds, cardPrintStatuses = {} } = location.state || { rowData: [], headers: [], rowIndex: -1, csvData: [], zipUrls: {}, cardId: null, batchId: null, cardIds: {}, cardPrintStatuses: {} };
+    const { rowData, headers, rowIndex, csvData, zipUrls, cardId, batchId, cardIds, cardPrintStatuses = {}, cardPhotoUrls = {} } = location.state || { rowData: [], headers: [], rowIndex: -1, csvData: [], zipUrls: {}, cardId: null, batchId: null, cardIds: {}, cardPrintStatuses: {}, cardPhotoUrls: {} };
 
     const { downloadZip } = useDownloadZip();
+    const { uploadZip } = useStorageProvider();
     const [zipBlob, setZipBlob] = useState<Blob | null>(null);
     const [photoUrl, setPhotoUrl] = useState<string | null>(null);
     const [isSaving, setIsSaving] = useState(false);
@@ -771,20 +773,10 @@ const BulkCardEditor: React.FC = () => {
             setSaveProgress(35);
             const blob = await generateZip();
 
-            // Step 3: Upload ZIP to Supabase Storage
+            // Step 3: Upload ZIP to active storage provider (Supabase or Google Drive)
             setSaveProgress(60);
-            const zipFileName = `zips/${employee.fullName.replace(/ /g, '_')}_${employee.employeeId}_ID_Card.zip`;
-            const { error: zipError } = await supabase.storage
-                .from('id-card-images')
-                .upload(zipFileName, blob, { upsert: true });
-
-            if (zipError) throw zipError;
-
-            const { data: publicUrlData } = supabase.storage
-                .from('id-card-images')
-                .getPublicUrl(zipFileName);
-
-            const finalZipUrl = publicUrlData.publicUrl;
+            const zipFileName = `${employee.fullName.replace(/ /g, '_')}_${employee.employeeId}_ID_Card.zip`;
+            const finalZipUrl = await uploadZip(blob, zipFileName, 'batch', batchId || undefined);
 
             // Filter out broken fetch delivery URLs - don't store them
             const safeFotoUrl = photoUrl && !photoUrl.includes('image/fetch/') ? photoUrl : null;
@@ -856,7 +848,8 @@ const BulkCardEditor: React.FC = () => {
                     zipUrls,
                     cardIds,
                     cardPrintStatuses,
-                    batchId
+                    batchId,
+                    cardPhotoUrls
                 }
             });
         } catch (error) {
@@ -957,7 +950,7 @@ const BulkCardEditor: React.FC = () => {
                     className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-3 transition-colors"
                 >
                     <span className="material-symbols-outlined text-lg">arrow_back</span>
-                    Back
+                    <span className="hidden md:inline">Back</span>
                 </button>
                 <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-6">
                     {/* Left: Card Previews */}
@@ -1040,20 +1033,27 @@ const BulkCardEditor: React.FC = () => {
 
                         {/* Actions Footer */}
                         <div className="p-4 border-t border-gray-200 dark:border-gray-700">
-                            <div className="grid grid-cols-2 gap-3">
+                            <div className="flex flex-wrap gap-3">
                                 <button
                                     onClick={handleDownload}
-                                    className="flex items-center justify-center gap-2 rounded-lg bg-gray-100 dark:bg-gray-800 px-4 py-2.5 text-sm font-medium text-gray-900 dark:text-white transition-colors hover:bg-gray-200 dark:hover:bg-gray-700"
+                                    className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-gray-100 dark:bg-gray-800 px-4 py-2.5 text-sm font-medium text-gray-900 dark:text-white transition-colors hover:bg-gray-200 dark:hover:bg-gray-700"
                                 >
                                     <span className="material-symbols-outlined text-lg">download</span>
                                     Download ZIP
                                 </button>
                                 <button
                                     onClick={handleSaveAndBack}
-                                    className="flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-primary/90"
+                                    className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-primary/90"
                                 >
                                     <span className="material-symbols-outlined text-lg">save</span>
                                     Save & Back
+                                </button>
+                                <button
+                                    onClick={() => navigate(-1)}
+                                    className="flex-1 flex items-center justify-center gap-2 rounded-lg border border-red-200 dark:border-red-900/30 px-4 py-2.5 text-sm font-medium text-red-600 dark:text-red-400 transition-colors hover:bg-red-50 dark:hover:bg-red-900/20"
+                                >
+                                    <span className="material-symbols-outlined text-lg">close</span>
+                                    Cancel
                                 </button>
                             </div>
                         </div>

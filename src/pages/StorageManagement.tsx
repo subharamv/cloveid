@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/hooks/useAuth';
 import AppHeader from '@/components/AppHeader';
 import { toast } from 'sonner';
-import { Folder, File, Trash2, Download, Search, RefreshCw, ChevronRight, ChevronDown, CheckSquare, Square, Loader2, HardDrive } from 'lucide-react';
+import { Folder, File, Trash2, Download, Search, RefreshCw, ChevronRight, ChevronDown, CheckSquare, Square, Loader2, HardDrive, ArrowLeft } from 'lucide-react';
 
 interface StorageFile {
     name: string;
@@ -20,6 +21,7 @@ interface FolderItem {
 }
 
 const StorageManagement = () => {
+    const navigate = useNavigate();
     const { userRole } = useAuth();
     const [files, setFiles] = useState<StorageFile[]>([]);
     const [folders, setFolders] = useState<FolderItem[]>([]);
@@ -325,14 +327,22 @@ const fetchStorageContents = async (targetPath: string) => {
             <main className="p-4 lg:p-6">
                 <div className="max-w-6xl mx-auto">
                     <div className="flex items-center justify-between mb-6">
-                        <div>
-                            <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                                <HardDrive className="h-6 w-6" />
-                                Storage Management
-                            </h1>
-                            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                                Manage files in id-card-images bucket
-                            </p>
+                        <div className="flex items-center gap-3">
+                            <button
+                                onClick={() => navigate(-1)}
+                                className="w-9 h-9 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 flex items-center justify-center text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600 transition-all shadow-sm"
+                            >
+                                <ArrowLeft size={18} />
+                            </button>
+                            <div>
+                                <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                                    <HardDrive className="h-6 w-6" />
+                                    Storage Management
+                                </h1>
+                                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                                    Manage files in id-card-images bucket
+                                </p>
+                            </div>
                         </div>
                         <button
                             onClick={() => fetchStorageContents(currentPath)}

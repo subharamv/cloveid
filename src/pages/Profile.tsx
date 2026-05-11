@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/hooks/useAuth';
-import { Save, User, Phone, MapPin, CreditCard, Droplet, Briefcase } from 'lucide-react';
+import { Save, User, Phone, MapPin, CreditCard, Droplet, Briefcase, ArrowLeft } from 'lucide-react';
 import AppHeader from '@/components/AppHeader';
 import { toast } from 'sonner';
 import { BLOOD_GROUPS, DEPARTMENTS } from '@/types/employee';
@@ -159,7 +159,8 @@ const Profile = () => {
                                 to={userRole === 'admin' || userRole === 'manager' ? "/dashboard" : "/user-dashboard"}
                                 className="flex items-center gap-2 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 font-medium rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
                             >
-                                Back
+                                <ArrowLeft size={18} className="md:hidden" />
+                                <span className="hidden md:inline">Back</span>
                             </Link>
                         </div>
 

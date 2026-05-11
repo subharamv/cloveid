@@ -10,8 +10,11 @@ import {
     RefreshCw, Plus, Eye, Download, Trash2, Search, ChevronRight,
     Edit3, Clock, CheckCircle2, Printer, Warehouse, FileText,
     TrendingUp, Users, Layers, Inbox, Package, ArrowRight,
-    Loader2, AlertCircle, Sun, Moon, CloudSun
+    Loader2, AlertCircle, Sun, Moon, CloudSun, X,
 } from 'lucide-react';
+import { IDCardFront } from '@/components/IDCardFront';
+import { IDCardBack } from '@/components/IDCardBack';
+import { Employee } from '@/types/employee';
 
 
 interface DashboardStats {
@@ -39,11 +42,18 @@ function getGreeting(): { text: string; icon: typeof Sun } {
 const Dashboard = () => {
     const navigate = useNavigate();
     const { session, userRole, logout, profile, loading: authLoading } = useAuth();
-    const { stats, batchCardStats, loading: statsLoading, refetch: refetchStats } = useDashboardStats();
+    const { stats, batchCardStats, singleCardStats, bulkCardStats, loading: statsLoading, refetch: refetchStats } = useDashboardStats();
 
     const [recentRequests, setRecentRequests] = useState<any[]>([]);
     const [cardDetails, setCardDetails] = useState<any[]>([]);
-    const [searchQuery, setSearchQuery] = useState('');
+
+    // Card preview modal
+    const frontCardRef = useRef<HTMLDivElement>(null);
+    const backCardRef = useRef<HTMLDivElement>(null);
+    const [previewCard, setPreviewCard] = useState<any>(null);
+    const [previewEmployee, setPreviewEmployee] = useState<Employee | null>(null);
+    const [previewLoading, setPreviewLoading] = useState(false);
+    const [previewSide, setPreviewSide] = useState<'front' | 'back'>('front');
     const [recentBatches, setRecentBatches] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [batchesPage, setBatchesPage] = useState(0);
@@ -57,6 +67,8 @@ const Dashboard = () => {
     const [requestsPage, setRequestsPage] = useState(0);
     const [requestsPageSize] = useState(5);
     const [requestsHasMore, setRequestsHasMore] = useState(true);
+
+    const [cardView, setCardView] = useState<'all' | 'single' | 'bulk' | 'requests'>('all');
 
     const [batchesLoading, setBatchesLoading] = useState(false);
     const [cardsLoading, setCardsLoading] = useState(false);
@@ -259,10 +271,32 @@ const Dashboard = () => {
         document.body.removeChild(link);
     };
 
-    const filteredCards = cardDetails.filter(card =>
-        card.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        card.employee_id?.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    const filteredCards = cardDetails.slice(0, 10);
+
+    const handleOpenPreview = async (card: any) => {
+        setPreviewCard(card);
+        setPreviewEmployee(null);
+        setPreviewLoading(true);
+        setPreviewSide('front');
+        try {
+            const { data, error } = await supabase.from('card_details').select('*').eq('id', card.id).single();
+            if (error || !data) throw new Error('Card not found');
+            setPreviewEmployee({
+                fullName: data.full_name || '',
+                employeeId: data.employee_id || '',
+                bloodGroup: data.blood_group || '',
+                branch: data.branch || '',
+                emergencyContact: data.emergency_contact || '',
+                countryCode: data.country_code || '',
+                photo_url: data.photo_url || null,
+            });
+        } catch (err: any) {
+            toast.error('Failed to load card data');
+            setPreviewCard(null);
+        } finally {
+            setPreviewLoading(false);
+        }
+    };
 
     const handleNewBatch = () => window.dispatchEvent(new CustomEvent('open-new-batch'));
 
@@ -286,18 +320,50 @@ const Dashboard = () => {
 
     const grades = [
         { label: 'In Editing', value: stats.inEditing, icon: Edit3, color: 'orange', link: '/manage-requests?status=In+Editing' },
-        { label: 'Awaiting Approval', value: stats.awaitingApproval, icon: Clock, color: 'amber', link: '/manage-requests?status=Pending' },
+        { label: 'Awaiting Approval', value: stats.awaitingApproval, icon: Clock, color: 'amber', link: '/manage-requests?status=Awaiting+Approval' },
         { label: 'Approved', value: stats.approved, icon: CheckCircle2, color: 'emerald', link: '/manage-requests?status=Approved' },
-        { label: 'Sent for Printing', value: stats.sentForPrinting, icon: Printer, color: 'blue', link: '/manage-requests?status=Printed' },
-        { label: 'Collected', value: batchCardStats.collected, icon: Package, color: 'violet', link: '/collect' },
+        { label: 'Sent for Printing', value: stats.sentForPrinting, icon: Printer, color: 'blue', link: '/manage-requests?status=Sent+for+Print' },
+        { label: 'Collected', value: stats.collected, icon: Package, color: 'violet', link: '/collect' },
     ];
 
+    const stageLinksMap: Record<string, Record<string, string>> = {
+        all: {
+            pending: '/batches',
+            sentForPrinting: '/batches?status=sent_for_printing',
+            printed: '/batches?status=completed',
+            readyToCollect: '/collect',
+            collected: '/collect',
+        },
+        single: {
+            pending: '/single-card-tracking?status=Pending',
+            sentForPrinting: '/single-card-tracking?status=Sent+for+Print',
+            printed: '/single-card-tracking?status=Printed',
+            readyToCollect: '/single-card-tracking?status=Ready+to+Collect',
+            collected: '/single-card-tracking?status=Collected',
+        },
+        bulk: {
+            pending: '/batches?status=pending',
+            sentForPrinting: '/batches?status=sent_for_printing',
+            printed: '/batches?status=completed',
+            readyToCollect: '/collect',
+            collected: '/collect',
+        },
+    };
+
     const stages = [
-        { label: 'Not Printed', value: batchCardStats.pending, icon: FileText, color: 'gray', desc: 'Not yet sent to vendor' },
-        { label: 'Sent to Vendor', value: batchCardStats.sentForPrinting, icon: Printer, color: 'amber', desc: 'Being processed by vendor' },
-        { label: 'Printed', value: batchCardStats.printed, icon: CheckCircle2, color: 'blue', desc: 'Completed by vendor' },
-        { label: 'Ready to Collect', value: batchCardStats.readyToCollect, icon: Warehouse, color: 'emerald', desc: 'Available for pickup' },
-        { label: 'Collected', value: batchCardStats.collected, icon: Package, color: 'violet', desc: 'Successfully collected' },
+        { key: 'pending', label: 'Not Printed', icon: FileText, color: 'gray', desc: 'Not yet sent to vendor' },
+        { key: 'sentForPrinting', label: 'Sent to Vendor', icon: Printer, color: 'amber', desc: 'Being processed by vendor' },
+        { key: 'printed', label: 'Printed', icon: CheckCircle2, color: 'blue', desc: 'Completed by vendor' },
+        { key: 'readyToCollect', label: 'Ready to Collect', icon: Warehouse, color: 'emerald', desc: 'Available for pickup' },
+        { key: 'collected', label: 'Collected', icon: Package, color: 'violet', desc: 'Successfully collected' },
+    ];
+
+    const requestStages = [
+        { key: 'inEditing', label: 'In Editing', icon: Edit3, color: 'orange', desc: 'Pending edits', link: '/manage-requests?status=In+Editing' },
+        { key: 'awaitingApproval', label: 'Awaiting Approval', icon: Clock, color: 'amber', desc: 'Ready for review', link: '/manage-requests?status=Awaiting+Approval' },
+        { key: 'approved', label: 'Approved', icon: CheckCircle2, color: 'emerald', desc: 'Approved by admin', link: '/manage-requests?status=Approved' },
+        { key: 'sentForPrinting', label: 'Sent for Printing', icon: Printer, color: 'blue', desc: 'Sent to vendor', link: '/manage-requests?status=Sent+for+Print' },
+        { key: 'collected', label: 'Collected', icon: Package, color: 'violet', desc: 'Successfully collected', link: '/manage-requests?status=Collected' },
     ];
 
     const iconGradients: Record<string, string> = {
@@ -366,30 +432,7 @@ const Dashboard = () => {
                         </div>
                     </div>
 
-                    {/* Request Stage Stats */}
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
-                        {grades.map(stat => {
-                            const Icon = stat.icon;
-                            return (
-                                <Link
-                                    key={stat.label}
-                                    to={stat.link}
-                                    className="group bg-white dark:bg-gray-800/80 rounded-xl border border-gray-200 dark:border-gray-700 p-4 hover:shadow-md hover:border-gray-300 dark:hover:border-gray-600 transition-all"
-                                >
-                                    <div className="flex items-center justify-between mb-3">
-                                        <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${iconGradients[stat.color]} flex items-center justify-center shadow-sm`}>
-                                            <Icon size={16} className="text-white" />
-                                        </div>
-                                        <ChevronRight size={14} className="text-gray-300 dark:text-gray-600 group-hover:translate-x-0.5 transition-transform" />
-                                    </div>
-                                    <p className="text-2xl font-bold text-gray-900 dark:text-white">{stat.value}</p>
-                                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{stat.label}</p>
-                                </Link>
-                            );
-                        })}
-                    </div>
-
-                    {/* Card Progress Tracking */}
+                    {/* Single & Batch Card Tracking */}
                     <div className="mb-8">
                         <div className="flex items-center justify-between mb-4">
                             <div>
@@ -397,20 +440,45 @@ const Dashboard = () => {
                                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Track cards through each stage</p>
                             </div>
                         </div>
+                        <div className="flex gap-2 overflow-x-auto mb-4 scrollbar-none">
+                            {([{ key: 'all', label: 'All Cards' }, { key: 'single', label: 'Single Cards' }, { key: 'bulk', label: 'Bulk Cards' }, { key: 'requests', label: 'Request Cards' }] as const).map(opt => (
+                                <button
+                                    key={opt.key}
+                                    onClick={() => setCardView(opt.key)}
+                                    className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
+                                        cardView === opt.key
+                                            ? 'bg-orange-500 text-white shadow-sm'
+                                            : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                                    }`}
+                                >
+                                    {opt.label}
+                                </button>
+                            ))}
+                        </div>
                         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-                            {stages.map(stage => {
+                            {(cardView === 'requests' ? requestStages : stages).map(stage => {
                                 const Icon = stage.icon;
+                                const activeStats = cardView === 'single' ? singleCardStats : cardView === 'bulk' ? bulkCardStats : cardView === 'requests' ? stats : batchCardStats;
+                                const value = activeStats[stage.key as keyof typeof activeStats] ?? 0;
+                                const stageLink = cardView === 'requests'
+                                    ? (stage as typeof requestStages[0]).link
+                                    : (stageLinksMap[cardView]?.[stage.key] ?? stageLinksMap.all[stage.key]);
                                 return (
-                                    <div key={stage.label} className="bg-white dark:bg-gray-800/80 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+                                    <Link
+                                        key={stage.label}
+                                        to={stageLink}
+                                        className="group bg-white dark:bg-gray-800/80 rounded-xl border border-gray-200 dark:border-gray-700 p-4 hover:shadow-md hover:border-gray-300 dark:hover:border-gray-600 transition-all block"
+                                    >
                                         <div className="flex items-center justify-between mb-2">
                                             <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${iconGradients[stage.color]} flex items-center justify-center shadow-sm`}>
                                                 <Icon size={16} className="text-white" />
                                             </div>
+                                            <ChevronRight size={14} className="text-gray-300 dark:text-gray-600 group-hover:translate-x-0.5 transition-transform" />
                                         </div>
-                                        <p className="text-2xl font-bold text-gray-900 dark:text-white">{stage.value}</p>
+                                        <p className="text-2xl font-bold text-gray-900 dark:text-white">{value}</p>
                                         <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{stage.label}</p>
                                         <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">{stage.desc}</p>
-                                    </div>
+                                    </Link>
                                 );
                             })}
                         </div>
@@ -503,20 +571,46 @@ const Dashboard = () => {
                         </div>
                     </div>
 
-                    {/* Single Card Details */}
+                    {/* Single Card Stats */}
+                    <div className="mb-6">
+                        <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-4">Single Card Details</h2>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-4">
+                            {[
+                                { label: 'Pending', key: 'pending', icon: Edit3, color: 'from-gray-400 to-gray-600', count: singleCardStats.pending, link: '/single-card-tracking?status=Pending' },
+                                { label: 'Sent for Print', key: 'sentForPrinting', icon: Printer, color: 'from-blue-400 to-blue-600', count: singleCardStats.sentForPrinting, link: '/single-card-tracking?status=Sent+for+Print' },
+                                { label: 'Printed', key: 'printed', icon: CheckCircle2, color: 'from-emerald-400 to-emerald-600', count: singleCardStats.printed, link: '/single-card-tracking?status=Printed' },
+                                { label: 'Ready to Collect', key: 'readyToCollect', icon: Package, color: 'from-emerald-400 to-emerald-600', count: singleCardStats.readyToCollect, link: '/single-card-tracking?status=Ready+to+Collect' },
+                                { label: 'Collected', key: 'collected', icon: Package, color: 'from-violet-400 to-violet-600', count: singleCardStats.collected, link: '/single-card-tracking?status=Collected' },
+                            ].map(stat => {
+                                const Icon = stat.icon;
+                                return (
+                                    <Link
+                                        key={stat.key}
+                                        to={stat.link}
+                                        className="group bg-white dark:bg-gray-800/80 rounded-xl border border-gray-200 dark:border-gray-700 p-4 hover:shadow-md hover:border-gray-300 dark:hover:border-gray-600 transition-all block"
+                                    >
+                                        <div className="flex items-center justify-between mb-3">
+                                            <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${stat.color} flex items-center justify-center shadow-sm`}>
+                                                <Icon size={16} className="text-white" />
+                                            </div>
+                                            <ChevronRight size={14} className="text-gray-300 dark:text-gray-600 group-hover:translate-x-0.5 transition-transform" />
+                                        </div>
+                                        <p className="text-2xl font-bold text-gray-900 dark:text-white">{stat.count}</p>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{stat.label}</p>
+                                    </Link>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    {/* Single Card Details Table */}
                     <div className="mb-8">
-                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-                            <h2 className="text-lg font-bold text-gray-900 dark:text-white">Single Card Details</h2>
-                            <div className="relative w-full sm:w-64">
-                                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                                <input
-                                    type="text"
-                                    placeholder="Search by name or ID..."
-                                    className="w-full pl-9 pr-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm text-gray-900 dark:text-white placeholder:text-gray-400 focus:ring-2 focus:ring-orange-500/20 focus:border-orange-400 outline-none transition-all"
-                                    value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                />
-                            </div>
+                        <div className="flex items-center justify-between mb-4">
+                            <h2 className="text-lg font-bold text-gray-900 dark:text-white">Recent Single Cards</h2>
+                            <button onClick={() => navigate('/single-card-tracking')}
+                                className="text-xs font-medium text-orange-600 dark:text-orange-400 hover:underline flex items-center gap-1">
+                                View All <ChevronRight size={12} />
+                            </button>
                         </div>
 
                         <div className="bg-white dark:bg-gray-800/80 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
@@ -549,11 +643,18 @@ const Dashboard = () => {
                                                     <td className="px-5 py-4 text-right">
                                                         <div className="flex items-center justify-end gap-1">
                                                             <button
-                                                                onClick={() => navigate(`/single-card?requestId=${card.id}`)}
-                                                                className="p-2 text-gray-500 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/20 rounded-lg transition-colors"
-                                                                title="View Details"
+                                                                onClick={() => handleOpenPreview(card)}
+                                                                className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                                                                title="Preview Card"
                                                             >
                                                                 <Eye size={16} />
+                                                            </button>
+                                                            <button
+                                                                onClick={() => navigate(`/single-card?requestId=${card.id}`)}
+                                                                className="p-2 text-gray-500 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/20 rounded-lg transition-colors"
+                                                                title="Edit Card"
+                                                            >
+                                                                <Edit3 size={16} />
                                                             </button>
                                                             <button
                                                                 onClick={() => handleDownloadCard(card.zip_url, card.full_name)}
@@ -576,7 +677,7 @@ const Dashboard = () => {
                                         }) : (
                                             <tr>
                                                 <td colSpan={5} className="px-5 py-12 text-center text-sm text-gray-400">
-                                                    {searchQuery ? 'No cards match your search.' : 'No cards found.'}
+                                                    No cards found.
                                                 </td>
                                             </tr>
                                         )}
@@ -602,9 +703,13 @@ const Dashboard = () => {
                                             </div>
                                             <p className="text-xs text-gray-400 mb-3">{new Date(card.created_at).toLocaleDateString()}</p>
                                             <div className="flex items-center gap-2">
+                                                <button onClick={() => handleOpenPreview(card)}
+                                                    className="flex-1 flex items-center justify-center gap-1 py-2 text-xs font-medium text-blue-600 bg-blue-50 dark:bg-blue-900/10 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/20 transition-colors">
+                                                    <Eye size={13} /> Preview
+                                                </button>
                                                 <button onClick={() => navigate(`/single-card?requestId=${card.id}`)}
                                                     className="flex-1 flex items-center justify-center gap-1 py-2 text-xs font-medium text-orange-600 bg-orange-50 dark:bg-orange-900/10 rounded-lg hover:bg-orange-100 dark:hover:bg-orange-900/20 transition-colors">
-                                                    <Eye size={13} /> View
+                                                    <Edit3 size={13} /> Edit
                                                 </button>
                                                 <button onClick={() => handleDownloadCard(card.zip_url, card.full_name)}
                                                     className="flex-1 flex items-center justify-center gap-1 py-2 text-xs font-medium text-emerald-600 bg-emerald-50 dark:bg-emerald-900/10 rounded-lg hover:bg-emerald-100 dark:hover:bg-emerald-900/20 transition-colors">
@@ -617,21 +722,13 @@ const Dashboard = () => {
                                             </div>
                                         </div>
                                     );
-                                }) : (
+                                }                                ) : (
                                     <div className="p-6 text-center text-sm text-gray-400">
-                                        {searchQuery ? 'No cards match your search.' : 'No cards found.'}
+                                        No cards found.
                                     </div>
                                 )}
                             </div>
 
-                            {cardsHasMore && (
-                                <div className="flex justify-center px-5 py-3 border-t border-gray-100 dark:border-gray-700">
-                                    <button onClick={loadMoreCards} disabled={cardsLoading}
-                                        className="text-sm font-medium text-orange-600 dark:text-orange-400 hover:underline flex items-center gap-1">
-                                        {cardsLoading ? 'Loading...' : 'View more cards'} <ChevronRight size={14} />
-                                    </button>
-                                </div>
-                            )}
                         </div>
                     </div>
 
@@ -639,12 +736,10 @@ const Dashboard = () => {
                     <div>
                         <div className="flex items-center justify-between mb-4">
                             <h2 className="text-lg font-bold text-gray-900 dark:text-white">Recent Requests</h2>
-                            {requestsHasMore && (
-                                <button onClick={loadMoreRequests} disabled={requestsLoading}
-                                    className="text-xs font-medium text-orange-600 dark:text-orange-400 hover:underline flex items-center gap-1">
-                                    {requestsLoading ? 'Loading...' : 'View All'} <ChevronRight size={12} />
-                                </button>
-                            )}
+                            <button onClick={() => navigate('/manage-requests')}
+                                className="text-xs font-medium text-orange-600 dark:text-orange-400 hover:underline flex items-center gap-1">
+                                View All <ChevronRight size={12} />
+                            </button>
                         </div>
 
                         <div className="bg-white dark:bg-gray-800/80 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
@@ -723,6 +818,68 @@ const Dashboard = () => {
                         </div>
                     </div>
                 </main>
+            )}
+
+            {/* Card Preview Modal */}
+            {previewCard && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+                    onClick={e => { if (e.target === e.currentTarget) setPreviewCard(null); }}>
+                    <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+                        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700 sticky top-0 bg-white dark:bg-gray-900 z-10">
+                            <div>
+                                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Card Preview</h2>
+                                {previewEmployee && (
+                                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                                        {previewEmployee.fullName} · {previewEmployee.employeeId}
+                                    </p>
+                                )}
+                            </div>
+                            <button onClick={() => setPreviewCard(null)}
+                                className="p-2 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <div className="p-6">
+                            {previewLoading ? (
+                                <div className="flex flex-col items-center justify-center py-16 gap-3">
+                                    <Loader2 size={32} className="animate-spin text-orange-500" />
+                                    <p className="text-sm text-gray-500 dark:text-gray-400">Loading card data...</p>
+                                </div>
+                            ) : previewEmployee ? (
+                                <>
+                                    <div className="flex sm:hidden gap-2 mb-4">
+                                        {(['front', 'back'] as const).map(side => (
+                                            <button key={side} onClick={() => setPreviewSide(side)}
+                                                className={`flex-1 py-2 rounded-xl text-sm font-medium transition-colors ${
+                                                    previewSide === side
+                                                        ? 'bg-orange-500 text-white'
+                                                        : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
+                                                }`}>
+                                                {side === 'front' ? 'Front' : 'Back'}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <div className="flex flex-col sm:flex-row gap-6 items-center justify-center">
+                                        <div className={`flex flex-col items-center gap-2 ${previewSide === 'back' ? 'hidden sm:flex' : ''}`}>
+                                            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Front</p>
+                                            <div className="shadow-xl rounded-lg overflow-hidden">
+                                                <IDCardFront ref={frontCardRef} employee={previewEmployee} />
+                                            </div>
+                                        </div>
+                                        <div className={`flex flex-col items-center gap-2 ${previewSide === 'front' ? 'hidden sm:flex' : ''}`}>
+                                            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Back</p>
+                                            <div className="shadow-xl rounded-lg overflow-hidden">
+                                                <IDCardBack ref={backCardRef} employee={previewEmployee} />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="text-center py-8 text-sm text-gray-400">Failed to load card data.</div>
+                            )}
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     );

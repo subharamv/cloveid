@@ -4,10 +4,11 @@ import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/hooks/useAuth';
 import AppHeader from '../components/AppHeader';
 import { toast } from 'sonner';
-import { Loader2, Upload, Trash2, Image as ImageIcon, MapPin, Phone, Mail, Globe, Save, Building2, Plus, Pencil, Layout, Layers, FileDigit, Info, Palette, HardDrive } from 'lucide-react';
+import { Loader2, Upload, Trash2, Image as ImageIcon, MapPin, Phone, Mail, Globe, Save, Building2, Plus, Pencil, Layout, Layers, FileDigit, Info, Palette, HardDrive, FolderOpen, ExternalLink, CheckCircle2, CloudUpload } from 'lucide-react';
 import { useBranding } from '@/hooks/useBranding';
 import { useBranches, Branch } from '@/hooks/useBranches';
 import { useDepartments, Department } from '@/hooks/useDepartments';
+import { useStorageProvider } from '@/hooks/useStorageProvider';
 import { useNavigate } from 'react-router-dom';
 
 type Tab = 'branding' | 'branches' | 'departments' | 'contact' | 'cardEditor' | 'storage';
@@ -18,6 +19,8 @@ const BrandingSettings = () => {
     const { branding, loading: brandingLoading, refreshBranding } = useBranding();
     const { branches, loading: branchesLoading, refreshBranches } = useBranches();
     const { departments, loading: departmentsLoading, refreshDepartments } = useDepartments();
+    const { provider: storageProvider, loading: storageLoading, updateProvider: updateStorageProvider } = useStorageProvider();
+    const [savingStorage, setSavingStorage] = useState(false);
     const [activeTab, setActiveTab] = useState<Tab>('branding');
     const [uploading, setUploading] = useState<string | null>(null);
     const [saving, setSaving] = useState<string | null>(null);
@@ -189,8 +192,6 @@ const BrandingSettings = () => {
                                 onClick={() => {
                                     if (tab.id === 'cardEditor') {
                                         navigate('/settings/card-editor');
-                                    } else if (tab.id === 'storage') {
-                                        navigate('/settings/storage');
                                     } else {
                                         setActiveTab(tab.id);
                                     }
@@ -453,6 +454,149 @@ const BrandingSettings = () => {
                                         </button>
                                     </div>
                                 </div>
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* Storage Section */}
+                {activeTab === 'storage' && (
+                    <div>
+                        <div className="mb-6">
+                            <h2 className="text-lg font-bold text-gray-900 dark:text-white">Storage Settings</h2>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Choose where generated ID card ZIP files are stored.</p>
+                        </div>
+
+                        {/* Provider Toggle Card */}
+                        <div className="bg-white dark:bg-gray-800/80 rounded-2xl border border-gray-200 dark:border-gray-700 p-6 mb-6">
+                            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">Storage Provider</h3>
+                            {storageLoading ? (
+                                <div className="flex items-center gap-2 text-gray-400">
+                                    <Loader2 size={16} className="animate-spin" />
+                                    <span className="text-sm">Loading...</span>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    {/* Supabase Option */}
+                                    <button
+                                        onClick={async () => {
+                                            if (storageProvider === 'supabase') return;
+                                            setSavingStorage(true);
+                                            const { error } = await updateStorageProvider('supabase');
+                                            setSavingStorage(false);
+                                            if (error) toast.error('Failed to update storage provider');
+                                            else toast.success('Storage set to Supabase');
+                                        }}
+                                        className={`relative flex items-start gap-4 p-4 rounded-xl border-2 text-left transition-all ${
+                                            storageProvider === 'supabase'
+                                                ? 'border-orange-500 bg-orange-50 dark:bg-orange-900/10'
+                                                : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                                        }`}
+                                    >
+                                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                                            storageProvider === 'supabase'
+                                                ? 'bg-orange-500'
+                                                : 'bg-gray-100 dark:bg-gray-700'
+                                        }`}>
+                                            <HardDrive size={18} className={storageProvider === 'supabase' ? 'text-white' : 'text-gray-500 dark:text-gray-400'} />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-sm font-semibold text-gray-900 dark:text-white">Supabase Storage</p>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Store ZIPs in your Supabase bucket (default).</p>
+                                        </div>
+                                        {storageProvider === 'supabase' && (
+                                            <CheckCircle2 size={18} className="absolute top-3 right-3 text-orange-500" />
+                                        )}
+                                    </button>
+
+                                    {/* Google Drive Option */}
+                                    <button
+                                        onClick={async () => {
+                                            if (storageProvider === 'google_drive') return;
+                                            setSavingStorage(true);
+                                            const { error } = await updateStorageProvider('google_drive');
+                                            setSavingStorage(false);
+                                            if (error) toast.error('Failed to update storage provider');
+                                            else toast.success('Storage set to Google Drive');
+                                        }}
+                                        className={`relative flex items-start gap-4 p-4 rounded-xl border-2 text-left transition-all ${
+                                            storageProvider === 'google_drive'
+                                                ? 'border-orange-500 bg-orange-50 dark:bg-orange-900/10'
+                                                : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                                        }`}
+                                    >
+                                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                                            storageProvider === 'google_drive'
+                                                ? 'bg-orange-500'
+                                                : 'bg-gray-100 dark:bg-gray-700'
+                                        }`}>
+                                            <CloudUpload size={18} className={storageProvider === 'google_drive' ? 'text-white' : 'text-gray-500 dark:text-gray-400'} />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-sm font-semibold text-gray-900 dark:text-white">Google Drive</p>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Store ZIPs in a shared Google Drive folder, organised by month and batch.</p>
+                                        </div>
+                                        {storageProvider === 'google_drive' && (
+                                            <CheckCircle2 size={18} className="absolute top-3 right-3 text-orange-500" />
+                                        )}
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Google Drive Info (only when Drive is active) */}
+                        {storageProvider === 'google_drive' && (
+                            <div className="bg-white dark:bg-gray-800/80 rounded-2xl border border-gray-200 dark:border-gray-700 p-6 mb-6">
+                                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">Google Drive Configuration</h3>
+                                <div className="space-y-3 text-sm">
+                                    <div className="flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-900/50 rounded-xl">
+                                        <FolderOpen size={16} className="text-orange-500 mt-0.5 shrink-0" />
+                                        <div>
+                                            <p className="font-medium text-gray-700 dark:text-gray-300">Folder structure</p>
+                                            <p className="text-gray-500 dark:text-gray-400 mt-0.5">Root → <span className="font-mono text-xs bg-gray-200 dark:bg-gray-700 px-1 rounded">YYYY-MM</span> → <span className="font-mono text-xs bg-gray-200 dark:bg-gray-700 px-1 rounded">Batches / Single Cards</span></p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-900/50 rounded-xl">
+                                        <CloudUpload size={16} className="text-orange-500 mt-0.5 shrink-0" />
+                                        <div>
+                                            <p className="font-medium text-gray-700 dark:text-gray-300">Service account</p>
+                                            <p className="text-gray-500 dark:text-gray-400 mt-0.5 font-mono text-xs break-all">drive-storage-service@clove-id.iam.gserviceaccount.com</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                        <button
+                                            onClick={() => navigate('/settings/drive-storage')}
+                                            className="flex items-center gap-2 px-4 py-2.5 bg-orange-500 text-white rounded-xl text-sm font-medium hover:bg-orange-600 transition-colors shadow-sm"
+                                        >
+                                            <HardDrive size={15} />
+                                            Browse Files
+                                        </button>
+                                        <a
+                                            href="https://drive.google.com/drive/folders/0AInOeJo8pGboUk9PVA"
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                                        >
+                                            <ExternalLink size={15} />
+                                            Open in Drive
+                                        </a>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Browse Supabase Storage */}
+                        {storageProvider === 'supabase' && (
+                            <div className="bg-white dark:bg-gray-800/80 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
+                                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Supabase Storage</h3>
+                                <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Browse and manage files stored in your Supabase bucket.</p>
+                                <button
+                                    onClick={() => navigate('/settings/storage')}
+                                    className="flex items-center gap-2 px-4 py-2.5 bg-orange-500 text-white rounded-xl text-sm font-medium hover:bg-orange-600 transition-colors shadow-sm"
+                                >
+                                    <FolderOpen size={15} />
+                                    Browse Storage Files
+                                </button>
                             </div>
                         )}
                     </div>

@@ -835,11 +835,12 @@ const EditRequest: React.FC = () => {
                     </div>
 
                     {/* Action Buttons */}
-                    <div className="mt-3 flex gap-2">
+                    <div className="mt-3 flex gap-2 flex-wrap">
                         <button onClick={handleSave} className="bg-blue-500 text-white px-4 py-2 rounded-md">Save</button>
                         <button onClick={handleDownloadZip} className="bg-gray-500 text-white px-4 py-2 rounded-md">Download ZIP</button>
                         <button onClick={handleApprove} className="bg-green-500 text-white px-4 py-2 rounded-md">Approve</button>
                         <button onClick={handleReject} className="bg-red-500 text-white px-4 py-2 rounded-md">Reject</button>
+                        <button onClick={() => navigate(-1)} className="border border-red-200 dark:border-red-900/30 text-red-600 dark:text-red-400 px-4 py-2 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20">Cancel</button>
                     </div>
                 </div>
 
