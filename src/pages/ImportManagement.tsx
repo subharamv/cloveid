@@ -6,11 +6,13 @@ import AppHeader from '../components/AppHeader';
 import { supabase } from '@/lib/supabaseClient';
 import html2canvas from 'html2canvas';
 import { HiddenCardRenderer } from '../components/HiddenCardRenderer';
+import { IDCardFront } from '../components/IDCardFront';
+import { IDCardBack } from '../components/IDCardBack';
 import { imageToDataUrl } from '@/lib/utils';
 import cloveLogo from '@/assets/CLOVE LOGO BLACK.png';
 import backLogoSvg from '@/assets/logo svg.png';
 import {
-    Box, ChevronLeft, Search, Loader2, Trash2, Download, Send, Eye, Edit3,
+    Box, ChevronLeft, Search, Loader2, Trash2, Download, Send, Eye, Edit3, X,
 } from 'lucide-react';
 
 const ImportManagement = () => {
@@ -36,6 +38,9 @@ const ImportManagement = () => {
     const [isDownloading, setIsDownloading] = useState(false);
     const [deletedCardIds, setDeletedCardIds] = useState<number[]>([]);
     const [cardPhotoUrls, setCardPhotoUrls] = useState<Record<number, string>>(location.state?.cardPhotoUrls || {});
+    const [cardViewEmployee, setCardViewEmployee] = useState<any>(null);
+    const [isCardViewOpen, setIsCardViewOpen] = useState(false);
+    const [isCardFlipped, setIsCardFlipped] = useState(false);
 
     useEffect(() => {
         const loadLogos = async () => {
@@ -566,21 +571,14 @@ const ImportManagement = () => {
     };
 
     const handleViewCard = (row: string[], rowIndex: number) => {
-        const cardId = cardIds[rowIndex];
         const employee = csvRowToEmployee(row, rowIndex);
         if (cardPhotoUrls[rowIndex]) {
             employee.photo_url = cardPhotoUrls[rowIndex];
             employee.photo = cardPhotoUrls[rowIndex];
         }
-        navigate(`/single-card?requestId=${cardId || rowIndex}`, {
-            state: {
-                sourceTable: 'id_cards', headers, rowIndex, csvData,
-                zipUrls: { ...zipUrls }, cardIds: { ...cardIds }, batchId,
-                cardPrintStatuses: { ...cardPrintStatuses }, employee, cardId,
-                cardPhotoUrls: { ...cardPhotoUrls },
-                viewOnly: true, returnPath: '/import-management',
-            },
-        });
+        setCardViewEmployee(employee);
+        setIsCardViewOpen(true);
+        setIsCardFlipped(false);
     };
 
     const confirmSendToPrint = async () => {
@@ -943,6 +941,37 @@ const ImportManagement = () => {
                                     {isDownloading ? 'Sending...' : 'Send'}
                                 </button>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isCardViewOpen && cardViewEmployee && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+                    <div className="relative bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-lg w-full shadow-xl">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-bold text-gray-900 dark:text-white">View Card</h3>
+                            <button onClick={() => setIsCardViewOpen(false)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <div className="flex justify-center" style={{ perspective: '1000px' }}>
+                            <div
+                                className="relative w-[230px] h-[365px] cursor-pointer"
+                                style={{ transformStyle: 'preserve-3d', transition: 'transform 0.6s', transform: isCardFlipped ? 'rotateY(180deg)' : 'rotateY(0deg)' }}
+                                onClick={() => setIsCardFlipped(!isCardFlipped)}
+                            >
+                                <div className="absolute inset-0" style={{ backfaceVisibility: 'hidden' }}>
+                                    <IDCardFront employee={cardViewEmployee} logoSrc={frontLogoDataUrl} />
+                                </div>
+                                <div className="absolute inset-0" style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
+                                    <IDCardBack employee={cardViewEmployee} logoSrc={backLogoDataUrl} />
+                                </div>
+                            </div>
+                        </div>
+                        <p className="text-center text-sm text-gray-500 dark:text-gray-400 mt-4">Click card to flip</p>
+                        <div className="flex justify-end mt-4">
+                            <button onClick={() => setIsCardViewOpen(false)} className="px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors">Close</button>
                         </div>
                     </div>
                 </div>

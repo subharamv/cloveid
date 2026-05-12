@@ -23,10 +23,10 @@ interface RaiseIssueModalProps {
 }
 
 const RaiseIssueModal: React.FC<RaiseIssueModalProps> = ({ isOpen, onClose }) => {
-  const { user, userRole } = useAuth();
+  const { user, userRole, effectiveUserId } = useAuth();
   const [issueType, setIssueType] = useState('');
   const [description, setDescription] = useState('');
-  const [relatedVendorRequestId, setRelatedVendorRequestId] = useState<number | null>(null);
+  const [relatedVendorRequestIds, setRelatedVendorRequestIds] = useState<number[]>([]);
   const [vendorRequests, setVendorRequests] = useState<any[]>([]);
   const [cardSearchQuery, setCardSearchQuery] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -40,7 +40,7 @@ const RaiseIssueModal: React.FC<RaiseIssueModalProps> = ({ isOpen, onClose }) =>
     if (isOpen) {
       setIssueType('');
       setDescription('');
-      setRelatedVendorRequestId(null);
+      setRelatedVendorRequestIds([]);
       setCardSearchQuery('');
     }
   }, [isOpen]);
@@ -52,13 +52,13 @@ const RaiseIssueModal: React.FC<RaiseIssueModalProps> = ({ isOpen, onClose }) =>
   }, [isVendor, isOpen, issueType]);
 
   const fetchVendorRequests = async () => {
-    if (!user) return;
+    if (!effectiveUserId) return;
     setLoadingCards(true);
     try {
       const { data, error } = await supabase
         .from('vendor_requests')
         .select('id, card_details, status, sent_at')
-        .eq('vendor_id', user.id)
+        .eq('vendor_id', effectiveUserId)
         .order('sent_at', { ascending: false });
 
       if (error) throw error;
@@ -85,11 +85,12 @@ const RaiseIssueModal: React.FC<RaiseIssueModalProps> = ({ isOpen, onClose }) =>
     setSubmitting(true);
     try {
       const { error } = await supabase.from('issues').insert({
-        user_id: user.id,
+        user_id: effectiveUserId,
         user_role: userRole,
         issue_type: issueType,
         description: description.trim(),
-        related_vendor_request_id: relatedVendorRequestId,
+        related_vendor_request_id: relatedVendorRequestIds.length === 1 ? relatedVendorRequestIds[0] : null,
+        related_vendor_request_ids: relatedVendorRequestIds.length > 1 ? relatedVendorRequestIds : null,
         status: 'open',
       });
 
@@ -184,30 +185,29 @@ const RaiseIssueModal: React.FC<RaiseIssueModalProps> = ({ isOpen, onClose }) =>
                     />
                   </div>
                   <div className="max-h-48 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg divide-y divide-gray-100 dark:divide-gray-800">
-                    <button
-                      type="button"
-                      onClick={() => setRelatedVendorRequestId(null)}
-                      className={`w-full text-left px-3 py-2 text-xs transition-colors ${
-                        relatedVendorRequestId === null
-                          ? 'bg-primary/10 text-primary font-medium'
-                          : 'text-muted-foreground hover:bg-gray-50 dark:hover:bg-gray-800'
-                      }`}
-                    >
-                      None (general query)
-                    </button>
                     {filteredCardRequests.map((req) => (
-                      <button
+                      <label
                         key={req.id}
-                        type="button"
-                        onClick={() => setRelatedVendorRequestId(req.id)}
-                        className={`w-full text-left px-3 py-2 text-sm transition-colors ${
-                          relatedVendorRequestId === req.id
-                            ? 'bg-primary/10 text-primary font-medium'
+                        className={`flex items-center gap-2 px-3 py-2 text-sm cursor-pointer transition-colors ${
+                          relatedVendorRequestIds.includes(req.id)
+                            ? 'bg-primary/10 text-primary'
                             : 'text-foreground hover:bg-gray-50 dark:hover:bg-gray-800'
                         }`}
                       >
+                        <input
+                          type="checkbox"
+                          checked={relatedVendorRequestIds.includes(req.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setRelatedVendorRequestIds([...relatedVendorRequestIds, req.id]);
+                            } else {
+                              setRelatedVendorRequestIds(relatedVendorRequestIds.filter(id => id !== req.id));
+                            }
+                          }}
+                          className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                        />
                         {getCardLabel(req)}
-                      </button>
+                      </label>
                     ))}
                     {filteredCardRequests.length === 0 && (
                       <p className="px-3 py-4 text-xs text-muted-foreground text-center">
@@ -215,6 +215,11 @@ const RaiseIssueModal: React.FC<RaiseIssueModalProps> = ({ isOpen, onClose }) =>
                       </p>
                     )}
                   </div>
+                  {relatedVendorRequestIds.length > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      {relatedVendorRequestIds.length} card{relatedVendorRequestIds.length !== 1 ? 's' : ''} selected
+                    </p>
+                  )}
                 </div>
               )}
               {vendorRequests.length === 0 && !loadingCards && (

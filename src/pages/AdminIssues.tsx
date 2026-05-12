@@ -22,6 +22,8 @@ interface Issue {
   updated_at: string;
 }
 
+type IssueStatus = 'open' | 'in_progress' | 'resolved' | 'closed';
+
 const STATUS_ICONS: Record<string, React.ReactNode> = {
   open: <AlertCircle size={14} />,
   in_progress: <Clock size={14} />,
@@ -55,6 +57,8 @@ const AdminIssues = () => {
   const [submittingReply, setSubmittingReply] = useState(false);
   const [filter, setFilter] = useState<string>('all');
   const [profiles, setProfiles] = useState<Record<string, { full_name: string; email: string }>>({});
+  const [selectedIssueIds, setSelectedIssueIds] = useState<Set<number>>(new Set());
+  const [selectAll, setSelectAll] = useState(false);
 
   const replyRef = useRef<HTMLDivElement>(null);
 
@@ -151,6 +155,41 @@ const AdminIssues = () => {
     ? issues
     : issues.filter((i) => i.status === filter);
 
+  const toggleSelectIssue = (id: number) => {
+    setSelectedIssueIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+    setSelectAll(false);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectAll) {
+      setSelectedIssueIds(new Set());
+      setSelectAll(false);
+    } else {
+      setSelectedIssueIds(new Set(filteredIssues.map(i => i.id)));
+      setSelectAll(true);
+    }
+  };
+
+  const handleBatchStatusChange = async (status: IssueStatus) => {
+    const ids = Array.from(selectedIssueIds);
+    if (ids.length === 0) { toast.error('Select at least one issue'); return; }
+    try {
+      for (const id of ids) {
+        await supabase.from('issues').update({ status, updated_at: new Date().toISOString() }).eq('id', id);
+      }
+      toast.success(`${ids.length} issue(s) marked as ${status}`);
+      setSelectedIssueIds(new Set());
+      setSelectAll(false);
+      fetchIssues();
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to update issues');
+    }
+  };
+
   const getStatusIcon = (status: string) => STATUS_ICONS[status] || <AlertCircle size={14} />;
   const getStatusColor = (status: string) => STATUS_COLORS[status] || STATUS_COLORS.open;
 
@@ -207,6 +246,44 @@ const AdminIssues = () => {
           </div>
         </div>
 
+        {/* Batch action bar */}
+        <div className="px-4 lg:px-6 pt-3 pb-1 shrink-0">
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={selectAll}
+                onChange={toggleSelectAll}
+                className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+              />
+              <span className="text-xs text-muted-foreground">Select all</span>
+            </label>
+            {selectedIssueIds.size > 0 && (
+              <div className="flex items-center gap-2 ml-2">
+                <span className="text-xs text-muted-foreground">{selectedIssueIds.size} selected</span>
+                <button
+                  onClick={() => handleBatchStatusChange('resolved')}
+                  className="px-3 py-1 rounded-lg text-xs font-medium bg-green-500 text-white hover:bg-green-600 transition-colors"
+                >
+                  Resolve Selected
+                </button>
+                <button
+                  onClick={() => handleBatchStatusChange('closed')}
+                  className="px-3 py-1 rounded-lg text-xs font-medium bg-gray-500 text-white hover:bg-gray-600 transition-colors"
+                >
+                  Close Selected
+                </button>
+                <button
+                  onClick={() => { setSelectedIssueIds(new Set()); setSelectAll(false); }}
+                  className="px-3 py-1 rounded-lg text-xs font-medium text-muted-foreground border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                >
+                  Clear
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-4 lg:px-6 pb-6">
           {loading ? (
@@ -231,11 +308,21 @@ const AdminIssues = () => {
                 return (
                   <div
                     key={issue.id}
-                    className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden"
+                    className={`bg-white dark:bg-gray-900 rounded-xl border shadow-sm overflow-hidden ${
+                      selectedIssueIds.has(issue.id)
+                        ? 'border-primary/40 ring-1 ring-primary/20'
+                        : 'border-gray-200 dark:border-gray-700'
+                    }`}
                   >
                     <div className="p-4">
                       <div className="flex items-start justify-between gap-3 mb-3">
                         <div className="flex items-center gap-2.5 min-w-0">
+                          <input
+                            type="checkbox"
+                            checked={selectedIssueIds.has(issue.id)}
+                            onChange={() => toggleSelectIssue(issue.id)}
+                            className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary shrink-0 mt-0.5"
+                          />
                           <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
                             <User size={15} className="text-primary" />
                           </div>

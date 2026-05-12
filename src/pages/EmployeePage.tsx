@@ -9,8 +9,9 @@ import { useDownloadZip } from '@/hooks/useDownloadZip';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/hooks/useAuth';
 import AppHeader from '@/components/AppHeader';
-import { CloudUpload, Check, Edit2, ZoomOut, ZoomIn, RotateCcw, RotateCw, RefreshCw } from 'lucide-react';
+import { Check, Edit2, ZoomOut, ZoomIn, RotateCcw, RotateCw, RefreshCw } from 'lucide-react';
 
 
 import logo from '@/assets/CLOVE LOGO BLACK.png';
@@ -28,6 +29,7 @@ import { imageToDataUrl, compressImage } from '@/lib/utils';
 import '@/styles/EmployeePage.css';
 const EmployeePage: React.FC = () => {
     const { downloadZip } = useDownloadZip();
+    const { effectiveUserId } = useAuth();
     const navigate = useNavigate();
     const [frontLogoDataUrl, setFrontLogoDataUrl] = useState<string>('');
     const [backLogoDataUrl, setBackLogoDataUrl] = useState<string>('');
@@ -46,8 +48,7 @@ const EmployeePage: React.FC = () => {
         status: 'Submitted',
     });
 
-    const [showUploadNote, setShowUploadNote] = useState(true);
-    const [isDraggingPhoto, setIsDraggingPhoto] = useState(false);
+    const [isProcessingImage, setIsProcessingImage] = useState(false);
     const [modal, setModal] = useState({ isOpen: false, type: 'error' as 'error' | 'success', title: '', message: '' });
 
     // editor state holds the HTMLImageElement and transform params
@@ -90,27 +91,23 @@ const EmployeePage: React.FC = () => {
     useEffect(() => {
         const fetchProfile = async () => {
             try {
-                const { data: { user } } = await supabase.auth.getUser();
+                if (!effectiveUserId) return;
 
-                if (user) {
-                    const employeeId = user.user_metadata?.employee_id || '';
+                const { data: profile } = await supabase
+                    .from('profiles')
+                    .select('*')
+                    .eq('id', effectiveUserId)
+                    .single();
 
-                    const { data: profile } = await supabase
-                        .from('profiles')
-                        .select('*')
-                        .eq('id', user.id)
-                        .single();
-
-                    if (profile) {
-                        setEmployee(prev => ({
-                            ...prev,
-                            fullName: profile.full_name || prev.fullName,
-                            employeeId: employeeId || prev.employeeId,
-                            bloodGroup: profile.blood_group || prev.bloodGroup,
-                            branch: profile.branch || prev.branch,
-                            emergencyContact: profile.phone || prev.emergencyContact,
-                        }));
-                    }
+                if (profile) {
+                    setEmployee(prev => ({
+                        ...prev,
+                        fullName: profile.full_name || prev.fullName,
+                        employeeId: profile.employee_id || prev.employeeId,
+                        bloodGroup: profile.blood_group || prev.bloodGroup,
+                        branch: profile.branch || prev.branch,
+                        emergencyContact: profile.phone || prev.emergencyContact,
+                    }));
                 }
             } catch (error) {
                 console.error('Error fetching profile:', error);
@@ -118,134 +115,112 @@ const EmployeePage: React.FC = () => {
         };
 
         fetchProfile();
-    }, []);
+    }, [effectiveUserId]);
 
     const handleShowModal = useCallback((type: 'error' | 'success', title: string, message: string) => {
         setModal({ isOpen: true, type, title, message });
     }, []);
 
-    const handleHideUploadNote = useCallback(() => {
-        setShowUploadNote(false);
-    }, []);
-
     const handlePhotoSelect = useCallback(async (file: File) => {
-        const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
-        const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
+        setIsProcessingImage(true);
+        try {
+            const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
+            const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
 
-        if (!cloudName || !uploadPreset) {
-            throw new Error('Missing Cloudinary configuration');
-        }
-
-        const cld = new Cloudinary({
-            cloud: {
-                cloudName
-            },
-            url: {
-                secure: true
+            if (!cloudName || !uploadPreset) {
+                throw new Error('Missing Cloudinary configuration');
             }
-        });
 
-        // Determine compression strategy based on file size
-        const fileSizeMB = file.size / (1024 * 1024);
-        let fileToUpload = file;
+            const cld = new Cloudinary({
+                cloud: { cloudName },
+                url: { secure: true }
+            });
 
-        if (fileSizeMB >= 10) {
-            console.log(`📦 File >= 10MB, compressing locally to stay within Cloudinary's 10MB limit...`);
-            toast.info(`Compressing ${fileSizeMB.toFixed(2)}MB image...`);
-            fileToUpload = await compressImage(file);
-            const compressedSizeMB = fileToUpload.size / (1024 * 1024);
-            console.log(`✓ Local compression complete: ${compressedSizeMB.toFixed(2)}MB`);
-        } else {
-            console.log(`✓ File < 10MB, uploading directly`);
+            const fileSizeMB = file.size / (1024 * 1024);
+            let fileToUpload = file;
+
+            if (fileSizeMB >= 10) {
+                console.log(`📦 File >= 10MB, compressing locally to stay within Cloudinary's 10MB limit...`);
+                toast.info(`Compressing ${fileSizeMB.toFixed(2)}MB image...`);
+                fileToUpload = await compressImage(file);
+                const compressedSizeMB = fileToUpload.size / (1024 * 1024);
+                console.log(`✓ Local compression complete: ${compressedSizeMB.toFixed(2)}MB`);
+            } else {
+                console.log(`✓ File < 10MB, uploading directly`);
+            }
+
+            const formData = new FormData();
+            formData.append('file', fileToUpload);
+            formData.append('upload_preset', uploadPreset);
+
+            const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                const message = data?.error?.message ?? 'Failed to upload image to Cloudinary';
+                throw new Error(message);
+            }
+
+            const publicId = data.public_id;
+
+            if (!publicId) {
+                throw new Error('Invalid Cloudinary response');
+            }
+
+            const cloudinaryImage = cld.image(publicId)
+                .effect(backgroundRemoval())
+                .resize(scale().width(1000))
+                .delivery(quality(auto()))
+                .delivery(format(autoFormat()));
+            const imageUrl = cloudinaryImage.toURL();
+
+            const originalImage = cld.image(publicId)
+                .resize(scale().width(1000))
+                .delivery(quality(auto()))
+                .delivery(format(autoFormat()));
+            const originalImageUrl = originalImage.toURL();
+            setPhotoUrl(imageUrl);
+
+            await new Promise<void>((resolve, reject) => {
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                img.onload = () => {
+                    setEditor(prev => ({
+                        ...prev,
+                        img,
+                        scale: 1,
+                        rotation: 0,
+                        tx: 0,
+                        ty: 0,
+                    }));
+                    setEmployee(prev => ({ ...prev, photo: fileToUpload }));
+                    setPhotoUrl(img.src);
+                    setIsProcessingImage(false);
+                    resolve();
+                };
+                img.onerror = () => {
+                    if (img.src === imageUrl) {
+                        console.warn('⚠️ Background removal failed - trying original...');
+                        img.src = originalImageUrl;
+                    } else {
+                        setIsProcessingImage(false);
+                        reject(new Error('Failed to load image from Cloudinary'));
+                    }
+                };
+                img.src = imageUrl;
+            });
+        } catch (error) {
+            setIsProcessingImage(false);
+            console.error('Photo upload error:', error);
+            toast.error(error instanceof Error ? error.message : 'Failed to upload photo');
         }
-
-        const formData = new FormData();
-        formData.append('file', fileToUpload);
-        formData.append('upload_preset', uploadPreset);
-
-        // Transformations are applied server-side via URL generation after upload
-        // Unsigned uploads don't support transformation parameter in FormData
-
-        const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
-            method: 'POST',
-            body: formData
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            const message = data?.error?.message ?? 'Failed to upload image to Cloudinary';
-            throw new Error(message);
-        }
-
-        const publicId = data.public_id;
-
-        if (!publicId) {
-            throw new Error('Invalid Cloudinary response');
-        }
-
-        // Apply background removal and optimizations to the uploaded image
-        const cloudinaryImage = cld.image(publicId)
-            .effect(backgroundRemoval())
-            .resize(scale().width(1000))
-            .delivery(quality(auto()))
-            .delivery(format(autoFormat()));
-        const imageUrl = cloudinaryImage.toURL();
-
-        const originalImage = cld.image(publicId)
-            .resize(scale().width(1000))
-            .delivery(quality(auto()))
-            .delivery(format(autoFormat()));
-        const originalImageUrl = originalImage.toURL();
-        setPhotoUrl(imageUrl);
-
-        await new Promise<void>((resolve, reject) => {
-            const img = new Image();
-            img.crossOrigin = 'anonymous';
-            img.onload = () => {
-                setEditor(prev => ({
-                    ...prev,
-                    img,
-                    scale: 1,
-                    rotation: 0,
-                    tx: 0,
-                    ty: 0,
-                }));
-                setEmployee(prev => ({ ...prev, photo: fileToUpload }));
-                setPhotoUrl(img.src);
-                resolve();
-            };
-            img.onerror = () => {
-                if (img.src === imageUrl) {
-                    console.warn('⚠️ Background removal failed - trying original...');
-                    img.src = originalImageUrl;
-                } else {
-                    reject(new Error('Failed to load image from Cloudinary'));
-                }
-            };
-            img.src = imageUrl;
-        });
     }, [setEditor, setEmployee]);
 
-    const handleDragOver = useCallback((e: React.DragEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setIsDraggingPhoto(true);
-    }, []);
 
-    const handleDragLeave = useCallback((e: React.DragEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setIsDraggingPhoto(false);
-    }, []);
-
-    const handleDrop = useCallback((e: React.DragEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setIsDraggingPhoto(false);
-        const file = e.dataTransfer.files[0];
-        if (file) handlePhotoSelect(file);
-    }, [handlePhotoSelect]);
 
     // drawEditor: paints the editor.img into the visible canvas sized to photoBoxRef
     const drawEditor = useCallback(() => {
@@ -535,7 +510,6 @@ const EmployeePage: React.FC = () => {
             try { URL.revokeObjectURL(lastObjectUrlRef.current); } catch (e) { /* ignore */ }
             lastObjectUrlRef.current = null;
         }
-        setShowUploadNote(true);
     }, []);
 
     const handleSubmitRequest = async () => {
@@ -545,14 +519,13 @@ const EmployeePage: React.FC = () => {
         }
 
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) {
+            if (!effectiveUserId) {
                 toast.error('You must be logged in to submit a request.');
                 return;
             }
 
             const { error } = await supabase.from('requests').insert({
-                user_id: user.id,
+                user_id: effectiveUserId,
                 full_name: employee.fullName,
                 employee_id: employee.employeeId,
                 branch: employee.branch,
@@ -657,29 +630,13 @@ const EmployeePage: React.FC = () => {
                             <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
                                 <div className="lg:col-span-3 bg-white dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-800 p-6 sm:p-8">
                                     <h2 className="text-slate-900 dark:text-white text-[22px] font-bold leading-tight tracking-[-0.015em] pb-6">Enter Your Details</h2>
-                                    <EmployeeForm employee={employee} onEmployeeChange={setEmployee} />
-                                    <div className="col-span-2">
-                                        <p className="text-slate-900 dark:text-slate-200 text-sm font-medium leading-normal pb-2">Profile Image</p>
-                                        <div className="flex items-center justify-center w-full">
-                                            <label
-                                                onDragOver={handleDragOver}
-                                                onDragLeave={handleDragLeave}
-                                                onDrop={handleDrop}
-                                                className={`flex flex-col items-center justify-center w-full h-40 border-2 border-dashed rounded-lg cursor-pointer bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors ${
-                                                    isDraggingPhoto
-                                                        ? 'border-orange-400 bg-orange-50 dark:bg-orange-900/20'
-                                                        : 'border-slate-300 dark:border-slate-700'
-                                                }`}
-                                            >
-                                                <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                                                    <CloudUpload size={36} className="text-slate-500 dark:text-slate-400 mb-2" />
-                                                    <p className="mb-2 text-sm text-slate-500 dark:text-slate-400"><span className="font-semibold">Click to upload</span> or drag and drop</p>
-                                                    <p className="text-xs text-slate-500 dark:text-slate-400">JPG or PNG (MAX. 2MB)</p>
-                                                </div>
-                                                <input className="hidden" type="file" onChange={(e) => e.target.files && handlePhotoSelect(e.target.files[0])} />
-                                            </label>
-                                        </div>
-                                    </div>
+                                    <EmployeeForm
+                                        employee={employee}
+                                        onEmployeeChange={setEmployee}
+                                        photoUrl={photoUrl}
+                                        onPhotoSelect={handlePhotoSelect}
+                                        hasImage={!!photoUrl}
+                                    />
                                     <button onClick={handleSubmitRequest} className="w-full sm:w-auto flex items-center justify-center rounded-lg h-12 px-6 bg-primary text-white text-base font-bold mt-8">Submit Request</button>
                                 </div>
                                 <div className="lg:col-span-2 space-y-8">
@@ -708,7 +665,7 @@ const EmployeePage: React.FC = () => {
                                             >
                                                 <div className="absolute w-full h-full backface-hidden">
                                                     <div className="w-full h-full mx-auto bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900 rounded-2xl p-6 shadow-lg flex items-center justify-center">
-                                                        <IDCardFront employee={employee} logoSrc={frontLogoDataUrl} canvasRef={canvasRef} photoBoxRef={photoBoxRef} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} />
+                                                        <IDCardFront employee={employee} logoSrc={frontLogoDataUrl} canvasRef={canvasRef} photoBoxRef={photoBoxRef} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} isLoadingImage={isProcessingImage} />
                                                     </div>
                                                 </div>
                                                 <div className="absolute w-full h-full backface-hidden rotate-y-180">

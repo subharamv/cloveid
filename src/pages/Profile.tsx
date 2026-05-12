@@ -12,7 +12,7 @@ const DEFAULT_AVATAR = "https://lh3.googleusercontent.com/aida-public/AB6AXuDTuk
 
 const Profile = () => {
     const navigate = useNavigate();
-    const { userRole, logout } = useAuth();
+    const { userRole, logout, effectiveUserId } = useAuth();
     const { branches } = useBranches();
     const [saving, setSaving] = useState(false);
     const [dynamicDepartments, setDynamicDepartments] = useState<string[]>([]);
@@ -53,9 +53,7 @@ const Profile = () => {
     useEffect(() => {
         const fetchProfile = async () => {
             try {
-                const { data: { user } } = await supabase.auth.getUser();
-
-                if (!user) {
+                if (!effectiveUserId) {
                     navigate('/');
                     return;
                 }
@@ -63,7 +61,7 @@ const Profile = () => {
                 const { data, error } = await supabase
                     .from('profiles')
                     .select('*')
-                    .eq('id', user.id)
+                    .eq('id', effectiveUserId)
                     .single();
 
                 if (error) throw error;
@@ -92,7 +90,7 @@ const Profile = () => {
         };
 
         fetchProfile();
-    }, [navigate]);
+    }, [navigate, effectiveUserId]);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
         const { name, value } = e.target;
@@ -117,9 +115,7 @@ const Profile = () => {
         setSaving(true);
 
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-
-            if (!user) throw new Error('No user found');
+            if (!effectiveUserId) throw new Error('No user found');
 
             const { error } = await supabase
                 .from('profiles')
@@ -133,7 +129,7 @@ const Profile = () => {
                     phone: formData.phone || null,
                     updated_at: new Date().toISOString()
                 })
-                .eq('id', user.id);
+                .eq('id', effectiveUserId);
 
             if (error) throw error;
 
@@ -156,7 +152,7 @@ const Profile = () => {
                         <div className="flex items-center justify-between mb-8">
                             <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Manage Profile</h1>
                             <Link
-                                to={userRole === 'admin' || userRole === 'manager' ? "/dashboard" : "/user-dashboard"}
+                                to={userRole === 'admin' || userRole === 'manager' || userRole === 'super_admin' ? "/dashboard" : "/user-dashboard"}
                                 className="flex items-center gap-2 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 font-medium rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
                             >
                                 <ArrowLeft size={18} className="md:hidden" />

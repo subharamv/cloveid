@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase, supabaseAdmin } from '@/lib/supabaseClient';
 import { useBranches } from '@/hooks/useBranches';
 import { DEPARTMENTS } from '@/types/employee';
 import { toast } from 'sonner';
@@ -117,13 +117,25 @@ export default function RegisterForm() {
       });
 
       if (signUpError) {
-        setError(signUpError.message);
+        if (signUpError.status === 429) {
+          toast.error('Too many registration attempts', {
+            description: 'Please wait a moment before trying again. This limit helps protect against abuse.',
+            duration: 6000,
+          });
+          setError('Too many attempts. Please wait a few minutes and try again.');
+        } else {
+          toast.error('Registration failed', {
+            description: signUpError.message,
+          });
+          setError(signUpError.message);
+        }
         setIsSubmitting(false);
         return;
       }
 
       if (signUpData.user) {
-        const { error: profileError } = await supabase
+        // Upsert profile to handle trigger race condition (trigger may have already created the profile)
+        const { error: profileError } = await supabaseAdmin
           .from('profiles')
           .upsert({
             id: signUpData.user.id,
@@ -132,18 +144,19 @@ export default function RegisterForm() {
             branch: form.branch || null,
             department: form.department || null,
             phone: form.phone.trim() || null,
+            email: form.email.trim(),
             role: 'user',
             is_active: false,
           }, { onConflict: 'id' });
 
         if (profileError) {
-          setError('Failed to create user profile. Please try again.');
+          setError('Failed to create account. Please contact support.');
           setIsSubmitting(false);
           return;
         }
 
-        toast.success('Registration Successful!', {
-          description: 'Please check your email to verify your account. Once verified, your account will be pending approval.',
+        toast.success('Registration submitted!', {
+          description: 'Your account is pending HR approval. You will be notified once an administrator approves your account.',
           duration: 6000,
         });
 
@@ -155,7 +168,11 @@ export default function RegisterForm() {
         setStep(1);
       }
     } catch (err: any) {
-      setError(err.message || 'An unexpected error occurred.');
+      const message = err.message || 'An unexpected error occurred.';
+      setError(message);
+      toast.error('Registration failed', {
+        description: message,
+      });
     } finally {
       setIsSubmitting(false);
     }

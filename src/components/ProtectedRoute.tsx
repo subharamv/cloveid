@@ -1,12 +1,14 @@
 import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
+import { ImpersonationBanner } from './ImpersonationBanner';
+import ProfileCompletionDialog from './ProfileCompletionDialog';
 
 interface ProtectedRouteProps {
   allowedRoles: string[];
 }
 
 export const ProtectedRoute = ({ allowedRoles }: ProtectedRouteProps) => {
-  const { session, userRole, isActive, loading, authReady, profileLoaded } = useAuth();
+  const { session, userRole, isActive, loading, authReady, profileLoaded, missingProfileFields } = useAuth();
 
   // Debug log for authorization
   console.log('AUTHZ CHECK', {
@@ -46,5 +48,11 @@ export const ProtectedRoute = ({ allowedRoles }: ProtectedRouteProps) => {
     return <Navigate to="/unauthorized" replace />;
   }
 
-  return <Outlet />;
+  return (
+    <>
+      <ImpersonationBanner />
+      <Outlet />
+      {profileLoaded && missingProfileFields.length > 0 && userRole !== 'vendor' && <ProfileCompletionDialog />}
+    </>
+  );
 };

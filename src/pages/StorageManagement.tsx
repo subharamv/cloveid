@@ -307,7 +307,7 @@ const fetchStorageContents = async (targetPath: string) => {
         f.name.toLowerCase().includes(searchQuery.toLowerCase())
     );
 
-    if (userRole !== 'admin') {
+    if (userRole !== 'admin' && userRole !== 'super_admin') {
         return (
             <div className="min-h-screen bg-gray-100 dark:bg-gray-950">
                 <AppHeader />

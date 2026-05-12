@@ -88,7 +88,7 @@ const Dashboard = () => {
     };
 
     useEffect(() => {
-        if (!authLoading && session && (userRole === 'admin' || userRole === 'manager')) {
+        if (!authLoading && session && (userRole === 'admin' || userRole === 'manager' || userRole === 'super_admin')) {
             fetchDashboardData();
             const handleFocus = () => { if (shouldFetch()) fetchDashboardData(); };
             window.addEventListener('focus', handleFocus);

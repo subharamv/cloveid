@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useRef, createContext, useContext, ReactNode } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase, supabaseAdmin } from '@/lib/supabaseClient';
 import { Session, User } from '@supabase/supabase-js';
 import { useNavigate } from 'react-router-dom';
 
 const CACHE_KEY = 'auth_cache';
+const PROFILE_REQUIRED_FIELDS = ['designation', 'blood_group', 'branch', 'department', 'phone'] as const;
 
 interface CachedAuth {
     userId: string | null;
@@ -23,6 +24,11 @@ interface AuthContextType {
     profileLoaded: boolean;
     logout: () => Promise<void>;
     clearSession: () => Promise<void>;
+    impersonatingUserId: string | null;
+    isImpersonating: boolean;
+    resetImpersonation: () => void;
+    missingProfileFields: string[];
+    refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -41,6 +47,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const mounted = useRef(true);
     const navigate = useNavigate();
     const lastInitializedUserRef = useRef<string | null>(null);
+    const [impersonatingUserId, setImpersonatingUserId] = useState<string | null>(null);
 
     // Sync loadingRef with loading state
     useEffect(() => {
@@ -226,6 +233,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         handleClearAuth(true);
     }, [handleClearAuth]);
 
+    const refreshProfile = useCallback(async () => {
+        if (!session?.user?.id) return;
+        console.log('Refreshing profile for user:', session.user.id);
+        profileCacheRef.current = null; // Bust cache
+        const fresh = await getProfile(session.user.id, userRole);
+        if (fresh && mounted.current) {
+            setProfile(fresh);
+            setUserRole(fresh.role);
+            setIsActive(fresh.is_active);
+        }
+    }, [session, userRole]);
+
     const initAuth = useCallback(async () => {
         // GUARD: If auth is already ready for the same user, skip re-processing
         if (authReadyRef.current && lastInitializedUserRef.current) {
@@ -317,7 +336,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 setLoading(false);
 
                 // Load profile asynchronously, don't block auth readiness
-                const profile = await getProfile(supabaseSession.user.id, detectedRole);
+                const effectiveId = impersonatingUserId || supabaseSession.user.id;
+                const profile = await getProfile(effectiveId, detectedRole);
 
                 if (!mounted.current) {
                     clearTimeout(timeoutId);
@@ -366,7 +386,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     const resetInactivityTimer = useCallback(() => {
         if (timerRef.current) clearTimeout(timerRef.current);
-        if (session && userRole === 'admin') {
+        if (session && (userRole === 'admin' || userRole === 'super_admin')) {
             timerRef.current = setTimeout(() => {
                 console.log('Inactivity timeout reached, logging out...');
                 logout();
@@ -374,11 +394,36 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         }
     }, [session, userRole, logout]);
 
+    const impersonating = localStorage.getItem('impersonating_user');
+    const isImpersonating = !!impersonatingUserId;
+    const effectiveUserId = impersonatingUserId || (session?.user?.id ?? null);
+
+    const resetImpersonation = useCallback(() => {
+        localStorage.removeItem('impersonating_user');
+        localStorage.removeItem('original_user');
+        setImpersonatingUserId(null);
+        if (window.location.pathname !== '/user-management') {
+            navigate('/user-management', { replace: true });
+        }
+    }, [navigate]);
+
+    useEffect(() => {
+        const impersonating = localStorage.getItem('impersonating_user');
+        if (impersonating) {
+            try {
+                const data = JSON.parse(impersonating);
+                setImpersonatingUserId(data.id);
+            } catch (e) {
+                console.error('Failed to parse impersonating_user', e);
+            }
+        }
+    }, []);
+
     useEffect(() => {
         const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'];
         const handleActivity = () => resetInactivityTimer();
 
-        if (session && userRole === 'admin') {
+        if (session && (userRole === 'admin' || userRole === 'super_admin')) {
             events.forEach(event => window.addEventListener(event, handleActivity));
             resetInactivityTimer();
         }
@@ -464,7 +509,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                             });
 
                             // RULE 3: Enforce profile cache short-circuit
-                            const profile = await getProfile(currentSession.user.id, detectedRole);
+                            const effectiveId = impersonatingUserId || currentSession.user.id;
+                            const profile = await getProfile(effectiveId, detectedRole);
 
                             if (!mounted.current) {
                                 console.log('Component unmounted during profile fetch');
@@ -519,9 +565,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                                 setIsActive(cached.isActive);
                                 setProfile(cached.profile);
                             } else {
-                                // Use minimal defaults
+                                // Use minimal defaults - default is_active to false for safety
+                                // so pending users don't inadvertently get navigated to dashboard
                                 setUserRole(currentSession.user.user_metadata?.role || null);
-                                setIsActive(currentSession.user.user_metadata?.role === 'admin' ? true : null);
+                                setIsActive(currentSession.user.user_metadata?.role === 'admin' ? true : false);
                             }
                         }
                     }, 3000);
@@ -569,6 +616,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         };
     }, [initAuth, handleClearAuth]);
 
+    const missingProfileFields = profile
+        ? PROFILE_REQUIRED_FIELDS.filter((f) => !profile[f])
+        : [];
+
     const value = {
         session,
         user: session?.user ?? null,
@@ -579,7 +630,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         authReady,
         profileLoaded,
         logout,
-        clearSession
+        clearSession,
+        impersonatingUserId,
+        isImpersonating,
+        resetImpersonation,
+        effectiveUserId,
+        missingProfileFields,
+        refreshProfile,
     };
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

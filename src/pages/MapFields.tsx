@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import logo from '../assets/CLOVE LOGO BLACK.png';
 import AppHeader from '../components/AppHeader';
+import CameraCapture from '../components/CameraCapture';
 
 const MapFields = () => {
     const navigate = useNavigate();
@@ -14,7 +15,6 @@ const MapFields = () => {
     const [isCameraOpen, setIsCameraOpen] = useState(false);
     const [cameraIndex, setCameraIndex] = useState<number | null>(null);
     const [isDragActive, setIsDragActive] = useState(false);
-    const videoRef = useRef<HTMLVideoElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const parseCSV = (text: string) => {
@@ -147,38 +147,22 @@ const MapFields = () => {
         navigate('/bulk-card-editor', { state: { rowData, headers, rowIndex, csvData } });
     };
 
-    const handleCapture = async (index: number) => {
+    const handleCapture = (index: number) => {
         setCameraIndex(index);
         setIsCameraOpen(true);
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-            if (videoRef.current) {
-                videoRef.current.srcObject = stream;
-            }
-        } catch (error) {
-            console.error('Error accessing camera:', error);
-        }
     };
 
-    const takePicture = () => {
-        if (videoRef.current && cameraIndex !== null) {
-            const canvas = document.createElement('canvas');
-            canvas.width = videoRef.current.videoWidth;
-            canvas.height = videoRef.current.videoHeight;
-            canvas.getContext('2d')?.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-            const dataUrl = canvas.toDataURL('image/png');
+    const handleCameraCapture = (dataUrl: string) => {
+        if (cameraIndex !== null) {
             const newImages = [...images];
             newImages[cameraIndex] = dataUrl;
             setImages(newImages);
-            closeCamera();
         }
+        setIsCameraOpen(false);
+        setCameraIndex(null);
     };
 
     const closeCamera = () => {
-        if (videoRef.current && videoRef.current.srcObject) {
-            const stream = videoRef.current.srcObject as MediaStream;
-            stream.getTracks().forEach(track => track.stop());
-        }
         setIsCameraOpen(false);
         setCameraIndex(null);
     };
@@ -334,19 +318,10 @@ const MapFields = () => {
             </div>
 
             {isCameraOpen && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                    <div className="bg-white dark:bg-gray-800 p-4 rounded-lg">
-                        <video ref={videoRef} autoPlay className="w-full h-auto" />
-                        <div className="flex justify-center mt-4">
-                            <button onClick={takePicture} className="p-2 bg-primary text-white rounded-full">
-                                <span className="material-symbols-outlined">photo_camera</span>
-                            </button>
-                            <button onClick={closeCamera} className="p-2 bg-red-500 text-white rounded-full ml-4">
-                                <span className="material-symbols-outlined">close</span>
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                <CameraCapture
+                    onCapture={handleCameraCapture}
+                    onClose={closeCamera}
+                />
             )}
         </div>
     );

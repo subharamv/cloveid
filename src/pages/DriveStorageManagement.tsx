@@ -4,13 +4,18 @@ import AppHeader from '@/components/AppHeader';
 import { toast } from 'sonner';
 import {
   Folder, File, Download, Search, RefreshCw, ChevronRight,
-  Loader2, CloudUpload, ExternalLink, Home, Trash2, X, AlertTriangle,
+  Loader2, CloudUpload, ExternalLink, Home, Trash2, X, AlertTriangle, CheckSquare,
 } from 'lucide-react';
 import { listDriveFiles, searchDriveFiles, deleteDriveFile, DriveFolder, DriveFile } from '@/lib/googleDriveFiles';
+import JSZip from 'jszip';
 
 interface BreadcrumbEntry {
   id: string;
   name: string;
+}
+
+interface FolderContents {
+  [folderId: string]: DriveFile[];
 }
 
 const ROOT_FOLDER_ID = '0AInOeJo8pGboUk9PVA';
@@ -33,6 +38,16 @@ const DriveStorageManagement = () => {
   // Delete state
   const [deletingFileId, setDeletingFileId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  // Multi-select state
+  const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set());
+  const [selectedFolderIds, setSelectedFolderIds] = useState<Set<string>>(new Set());
+  const [folderContents, setFolderContents] = useState<FolderContents>({});
+  const [loadingFolderContents, setLoadingFolderContents] = useState<Set<string>>(new Set());
+  const [selectAll, setSelectAll] = useState(false);
+  const [batchDeleting, setBatchDeleting] = useState(false);
+  const [batchDownloading, setBatchDownloading] = useState(false);
+  const [confirmBatchDelete, setConfirmBatchDelete] = useState(false);
 
   const fetchContents = useCallback(async (folderId: string) => {
     setLoading(true);
@@ -141,6 +156,178 @@ const DriveStorageManagement = () => {
     });
   };
 
+  const toggleSelectFile = (fileId: string) => {
+    setSelectedFileIds(prev => {
+      const next = new Set(prev);
+      if (next.has(fileId)) next.delete(fileId); else next.add(fileId);
+      return next;
+    });
+    setSelectAll(false);
+  };
+
+  const toggleSelectFolder = async (folder: DriveFolder) => {
+    setSelectedFolderIds(prev => {
+      const next = new Set(prev);
+      if (next.has(folder.id)) {
+        next.delete(folder.id);
+        setSelectedFileIds(prev => {
+          const fileIds = folderContents[folder.id]?.map(f => f.id) || [];
+          const updated = new Set(prev);
+          fileIds.forEach(id => updated.delete(id));
+          return updated;
+        });
+        return next;
+      } else {
+        next.add(folder.id);
+        return next;
+      }
+    });
+
+    if (!selectedFolderIds.has(folder.id) && !folderContents[folder.id]) {
+      setLoadingFolderContents(prev => new Set(prev).add(folder.id));
+      try {
+        const result = await listDriveFiles(folder.id);
+        setFolderContents(prev => ({ ...prev, [folder.id]: result.files }));
+        setSelectedFileIds(prev => {
+          const next = new Set(prev);
+          result.files.forEach(f => next.add(f.id));
+          return next;
+        });
+      } catch (err: any) {
+        toast.error(`Failed to load folder contents: ${err.message}`);
+      } finally {
+        setLoadingFolderContents(prev => {
+          const next = new Set(prev);
+          next.delete(folder.id);
+          return next;
+        });
+      }
+    } else if (folderContents[folder.id]) {
+      setSelectedFileIds(prev => {
+        const next = new Set(prev);
+        const fileIds = folderContents[folder.id].map(f => f.id);
+        fileIds.forEach(id => next.add(id));
+        return next;
+      });
+    }
+  };
+
+  const handleDownloadFolder = async (folder: DriveFolder) => {
+    setLoadingFolderContents(prev => new Set(prev).add(folder.id));
+    let files: DriveFile[];
+    try {
+      const result = await listDriveFiles(folder.id);
+      files = result.files;
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to load folder contents');
+      setLoadingFolderContents(prev => { const next = new Set(prev); next.delete(folder.id); return next; });
+      return;
+    }
+    setLoadingFolderContents(prev => { const next = new Set(prev); next.delete(folder.id); return next; });
+
+    if (files.length === 0) {
+      toast.error('Folder is empty');
+      return;
+    }
+
+    setBatchDownloading(true);
+    try {
+      const zip = new JSZip();
+      let count = 0;
+      for (const file of files) {
+        try {
+          const res = await fetch(file.downloadUrl);
+          const blob = await res.blob();
+          zip.file(file.name, blob);
+          count++;
+        } catch { /* skip failed */ }
+      }
+      if (count === 0) { toast.error('Could not download any files'); return; }
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(zipBlob);
+      link.download = `${folder.name}.zip`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+      toast.success(`Downloaded ${count} file(s) from "${folder.name}"`);
+    } catch (err: any) {
+      toast.error(err.message || 'Folder download failed');
+    } finally {
+      setBatchDownloading(false);
+    }
+  };
+
+  const toggleSelectAllFiles = () => {
+    const current = displayFiles;
+    const folderFileIds = Object.values(folderContents).flat().map(f => f.id);
+    const allVisibleFileIds = [...current.map(f => f.id), ...folderFileIds];
+    if (selectAll) {
+      setSelectedFileIds(new Set());
+      setSelectAll(false);
+    } else {
+      setSelectedFileIds(new Set(allVisibleFileIds));
+      setSelectAll(true);
+    }
+  };
+
+  const handleBatchDownload = async () => {
+    const ids = Array.from(selectedFileIds);
+    const selected = displayFiles.filter(f => ids.includes(f.id));
+    if (selected.length === 0) { toast.error('No files selected'); return; }
+    setBatchDownloading(true);
+    try {
+      const zip = new JSZip();
+      let count = 0;
+      for (const file of selected) {
+        try {
+          const res = await fetch(file.downloadUrl);
+          const blob = await res.blob();
+          zip.file(file.name, blob);
+          count++;
+        } catch { /* skip failed */ }
+      }
+      if (count === 0) { toast.error('Could not download any files'); return; }
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(zipBlob);
+      link.download = `drive-files-${Date.now()}.zip`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+      toast.success(`Downloaded ${count} file(s)`);
+      setSelectedFileIds(new Set());
+      setSelectAll(false);
+    } catch (err: any) {
+      toast.error(err.message || 'Batch download failed');
+    } finally {
+      setBatchDownloading(false);
+    }
+  };
+
+  const handleBatchDelete = async () => {
+    const ids = Array.from(selectedFileIds);
+    if (ids.length === 0) { toast.error('No files selected'); return; }
+    setBatchDeleting(true);
+    let success = 0;
+    try {
+      for (const fileId of ids) {
+        try {
+          await deleteDriveFile(fileId);
+          success++;
+        } catch { /* skip failed */ }
+      }
+      toast.success(`Deleted ${success} file(s)`);
+      setFiles(prev => prev.filter(f => !ids.includes(f.id)));
+      setSearchResults(prev => prev.filter(f => !ids.includes(f.id)));
+      setSelectedFileIds(new Set());
+      setSelectAll(false);
+      setConfirmBatchDelete(false);
+    } catch (err: any) {
+      toast.error(err.message || 'Batch delete failed');
+    } finally {
+      setBatchDeleting(false);
+    }
+  };
+
   const FileActions = ({ file }: { file: DriveFile }) => {
     const isConfirming = confirmDeleteId === file.id;
     const isDeleting = deletingFileId === file.id;
@@ -200,7 +387,7 @@ const DriveStorageManagement = () => {
     );
   };
 
-  if (userRole !== 'admin') {
+  if (userRole !== 'admin' && userRole !== 'super_admin') {
     return (
       <div className="min-h-screen bg-gray-100 dark:bg-gray-950">
         <AppHeader />
@@ -216,6 +403,7 @@ const DriveStorageManagement = () => {
 
   const displayFiles = isGlobalSearch ? searchResults : files;
   const displayFolders = isGlobalSearch ? [] : folders;
+  const allSelectedFiles = selectedFileIds;
 
   return (
     <div className="min-h-screen bg-gray-100 dark:bg-gray-950">
@@ -316,6 +504,73 @@ const DriveStorageManagement = () => {
             </div>
           )}
 
+          {/* Batch action bar */}
+          {displayFiles.length > 0 && (
+            <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-3 mb-4">
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectAll}
+                    onChange={toggleSelectAllFiles}
+                    className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                  />
+                  <span className="text-xs text-muted-foreground">Select All</span>
+                </label>
+                {(selectedFileIds.size > 0 || selectedFolderIds.size > 0) && (
+                  <div className="flex items-center gap-2 ml-2">
+                    <span className="text-xs text-muted-foreground font-medium">
+                      {selectedFileIds.size} file{selectedFileIds.size !== 1 ? 's' : ''} selected
+                      {selectedFolderIds.size > 0 && ` (${selectedFolderIds.size} folder${selectedFolderIds.size !== 1 ? 's' : ''})`}
+                    </span>
+                    <button
+                      onClick={handleBatchDownload}
+                      disabled={batchDownloading}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-500 text-white hover:bg-blue-600 transition-colors disabled:opacity-50 flex items-center gap-1"
+                    >
+                      {batchDownloading ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                      Download All
+                    </button>
+                    {!confirmBatchDelete ? (
+                      <button
+                        onClick={() => setConfirmBatchDelete(true)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500 text-white hover:bg-red-600 transition-colors flex items-center gap-1"
+                      >
+                        <Trash2 size={12} /> Delete All
+                      </button>
+                    ) : (
+                      <>
+                        <span className="text-xs text-red-600 dark:text-red-400 font-medium flex items-center gap-1">
+                          <AlertTriangle size={12} /> Delete {selectedFileIds.size} file(s)?
+                        </span>
+                        <button
+                          onClick={handleBatchDelete}
+                          disabled={batchDeleting}
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500 text-white hover:bg-red-600 transition-colors disabled:opacity-50"
+                        >
+                          {batchDeleting ? <Loader2 size={12} className="animate-spin" /> : 'Yes'}
+                        </button>
+                        <button
+                          onClick={() => setConfirmBatchDelete(false)}
+                          disabled={batchDeleting}
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                        >
+                          No
+                        </button>
+                      </>
+                    )}
+                    <button
+                      onClick={() => { setSelectedFileIds(new Set()); setSelectedFolderIds(new Set()); setFolderContents({}); setSelectAll(false); setConfirmBatchDelete(false); }}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                    >
+                      <X size={12} /> Clear
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* File List */}
           <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
             {(loading && !isGlobalSearch) || (isSearching) ? (
@@ -334,6 +589,16 @@ const DriveStorageManagement = () => {
                 <table className="w-full">
                   <thead>
                     <tr className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-800">
+                      <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-10">
+                        {displayFiles.length > 0 && (
+                          <input
+                            type="checkbox"
+                            checked={selectAll}
+                            onChange={toggleSelectAllFiles}
+                            className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                          />
+                        )}
+                      </th>
                       <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Name</th>
                       <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider hidden sm:table-cell">Size</th>
                       <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider hidden md:table-cell">Modified</th>
@@ -348,6 +613,16 @@ const DriveStorageManagement = () => {
                         onClick={() => navigateInto(folder)}
                       >
                         <td className="py-3 px-4">
+                          <input
+                            type="checkbox"
+                            checked={selectedFolderIds.has(folder.id)}
+                            onChange={() => toggleSelectFolder(folder)}
+                            disabled={loadingFolderContents.has(folder.id)}
+                            className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                            onClick={e => e.stopPropagation()}
+                          />
+                        </td>
+                        <td className="py-3 px-4">
                           <div className="flex items-center gap-2">
                             <Folder size={16} className="text-yellow-500 shrink-0" />
                             <span className="text-sm font-medium text-gray-900 dark:text-white hover:text-orange-500">
@@ -357,13 +632,40 @@ const DriveStorageManagement = () => {
                         </td>
                         <td className="py-3 px-4 text-sm text-gray-400 hidden sm:table-cell">—</td>
                         <td className="py-3 px-4 text-sm text-gray-400 hidden md:table-cell">—</td>
-                        <td className="py-3 px-4 text-right">
-                          <ChevronRight size={16} className="text-gray-400 ml-auto" />
+                        <td className="py-3 px-4">
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleDownloadFolder(folder); }}
+                              disabled={loadingFolderContents.has(folder.id)}
+                              className="p-1.5 text-gray-400 hover:text-blue-500 transition-colors disabled:opacity-50"
+                              title="Download folder as ZIP"
+                            >
+                              {loadingFolderContents.has(folder.id) ? (
+                                <Loader2 size={16} className="animate-spin" />
+                              ) : (
+                                <Download size={16} />
+                              )}
+                            </button>
+                            <ChevronRight size={16} className="text-gray-400" />
+                          </div>
                         </td>
                       </tr>
                     ))}
                     {displayFiles.map(file => (
-                      <tr key={file.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">
+                      <tr
+                        key={file.id}
+                        className={`hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors ${
+                          selectedFileIds.has(file.id) ? 'bg-primary/5 dark:bg-primary/10' : ''
+                        }`}
+                      >
+                        <td className="py-3 px-4">
+                          <input
+                            type="checkbox"
+                            checked={selectedFileIds.has(file.id)}
+                            onChange={() => toggleSelectFile(file.id)}
+                            className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                          />
+                        </td>
                         <td className="py-3 px-4">
                           <div className="flex items-center gap-2">
                             <File size={16} className="text-gray-400 shrink-0" />

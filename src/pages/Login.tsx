@@ -30,30 +30,33 @@ const Login: React.FC = () => {
     window.location.reload();
   };
 
-  useEffect(() => {
-    let stuckTimeout: NodeJS.Timeout;
-    if (session && !userRole && !loading) {
-      stuckTimeout = setTimeout(() => setIsAuthStuck(true), 5000);
-    } else {
-      setIsAuthStuck(false);
-    }
-    return () => clearTimeout(stuckTimeout);
-  }, [session, userRole, loading]);
+    useEffect(() => {
+        let stuckTimeout: NodeJS.Timeout;
+        // Only show stuck warning if there's a session but profile hasn't loaded
+        // Do NOT trigger for pending users (isActive === false)
+        if (session && !userRole && !loading && isActive === null) {
+            stuckTimeout = setTimeout(() => setIsAuthStuck(true), 5000);
+        } else {
+            setIsAuthStuck(false);
+        }
+        return () => clearTimeout(stuckTimeout);
+    }, [session, userRole, loading, isActive]);
 
-  useEffect(() => {
-    if (!loading && session) {
-      const role = userRole || session.user.user_metadata?.role;
-      if (!role) return;
-      if (isActive === false) return;
-      if (role === 'admin' || role === 'manager') {
-        setShowRoleDialog(true);
-      } else if (role === 'vendor') {
-        navigate('/vendor-dashboard', { replace: true });
-      } else {
-        navigate('/user-dashboard', { replace: true });
-      }
-    }
-  }, [session, userRole, isActive, loading, navigate]);
+    useEffect(() => {
+        if (!loading && session) {
+            const role = userRole || session.user.user_metadata?.role;
+            if (!role) return;
+            // Don't navigate if profile says account is pending, or if we don't know yet
+            if (isActive === false || isActive === null) return;
+            if (role === 'admin' || role === 'manager' || role === 'super_admin') {
+                setShowRoleDialog(true);
+            } else if (role === 'vendor') {
+                navigate('/vendor-dashboard', { replace: true });
+            } else {
+                navigate('/user-dashboard', { replace: true });
+            }
+        }
+    }, [session, userRole, isActive, loading, navigate]);
 
   // GSAP right panel entrance
   useEffect(() => {

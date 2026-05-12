@@ -149,7 +149,9 @@ const BrandingSettings = () => {
         }
     };
 
-    if (userRole !== 'admin' && userRole !== 'manager') {
+    const isAdmin = userRole === 'admin' || userRole === 'manager' || userRole === 'super_admin';
+
+    if (userRole !== 'admin' && userRole !== 'manager' && userRole !== 'super_admin') {
         return (
             <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-950 dark:to-gray-900 flex items-center justify-center">
                 <p className="text-xl font-semibold text-gray-900 dark:text-white">Unauthorized access</p>
@@ -165,7 +167,7 @@ const BrandingSettings = () => {
         { id: 'cardEditor' as Tab, label: 'Card Editor', icon: Palette },
     ];
 
-    if (userRole === 'admin') {
+    if (userRole === 'admin' || userRole === 'super_admin') {
         allTabs.push({ id: 'storage' as Tab, label: 'Storage', icon: HardDrive });
     }
 

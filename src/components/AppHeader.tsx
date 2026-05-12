@@ -24,6 +24,7 @@ const adminItems = (openNewBatch: () => void): CardNavItem[] => [
     links: [
       { label: "Overview", href: "/dashboard", ariaLabel: "Dashboard Overview" },
       { label: "Bulk Import", href: "/bulk-card-import", ariaLabel: "Bulk Card Import" },
+
       { ...NewBatchLink, onClick: openNewBatch },
     ]
   },
@@ -32,9 +33,11 @@ const adminItems = (openNewBatch: () => void): CardNavItem[] => [
     bgColor: "#2F293A",
     textColor: "#fff",
     links: [
-      { label: "Manage Requests", href: "/manage-requests", ariaLabel: "Manage Employee Requests" },
+      { label: "Employee Requests", href: "/manage-requests", ariaLabel: "Manage Employee Requests" },
       { label: "View Single Cards", href: "/single-card-tracking", ariaLabel: "View Single Cards" },
-      { label: "Batch Management", href: "/batches", ariaLabel: "Batch Management" },
+      { label: "View Batch Cards", href: "/batches", ariaLabel: "Batch Management" },
+      { label: "User Management", href: "/user-management", ariaLabel: "User Management" },
+
     ]
   },
   {
@@ -44,7 +47,7 @@ const adminItems = (openNewBatch: () => void): CardNavItem[] => [
     links: [
       { label: "Issued Cards", href: "/issued-cards", ariaLabel: "Issued ID Cards" },
       { label: "Vendor Management", href: "/vendor", ariaLabel: "Vendor Management" },
-      { label: "User Management", href: "/user-management", ariaLabel: "User Management" },
+      { label: "Order Accessories", href: "/order-request", ariaLabel: "Accessory Orders" },
       { label: "Branding", href: "/settings/branding", ariaLabel: "Branding Settings" },
     ]
   }
@@ -56,7 +59,7 @@ const userItems = (openProfile: () => void, showAdminLink?: boolean): CardNavIte
     bgColor: "#1B1722",
     textColor: "#fff",
     links: [
-      ...(showAdminLink ? [{ label: "Admin Dashboard", href: "/dashboard", ariaLabel: "Switch to Admin Dashboard" }] : []),
+      ...(showAdminLink || userRole === 'super_admin' ? [{ label: "Admin Dashboard", href: "/dashboard", ariaLabel: "Switch to Admin Dashboard" }] : []),
       { label: "Overview", href: "/user-dashboard", ariaLabel: "User Dashboard" },
       { label: "Raise New Card", href: "/employee-page", ariaLabel: "Request New ID Card" },
     ]
@@ -87,6 +90,7 @@ const vendorItems: CardNavItem[] = [
     links: [
       { label: "Active Requests", href: "/vendor-dashboard?tab=active", ariaLabel: "Active Requests" },
       { label: "Completed Cards", href: "/vendor-dashboard?tab=completed", ariaLabel: "Completed Cards" },
+
     ]
   },
   {
@@ -95,6 +99,7 @@ const vendorItems: CardNavItem[] = [
     textColor: "#fff",
     links: [
       { label: "Raise Issue", href: "#", ariaLabel: "Raise an Issue", onClick: () => window.dispatchEvent(new CustomEvent('open-raise-issue')) },
+      { label: "Order Accessories", href: "/vendor-orders", ariaLabel: "Accessory Orders" },
     ]
   }
 ];
@@ -114,7 +119,7 @@ const AppHeader: React.FC = () => {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [dropdownPos, setDropdownPos] = useState({ top: 0, right: 0 });
 
-  const isAdmin = userRole === 'admin' || userRole === 'manager';
+  const isAdmin = userRole === 'admin' || userRole === 'manager' || userRole === 'super_admin';
   const isVendor = userRole === 'vendor';
   const userRoutes = ['/user-dashboard', '/employee-page'];
   const isOnUserRoute = userRoutes.includes(location.pathname);
@@ -152,7 +157,7 @@ const AppHeader: React.FC = () => {
           .select('*', { count: 'exact', head: true })
           .in('status', ['open', 'in_progress']);
         setOpenIssuesCount(count || 0);
-      } catch {}
+      } catch { }
     };
     fetchOpenCount();
     const interval = setInterval(fetchOpenCount, 30000);

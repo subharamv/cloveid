@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import { supabaseAdmin } from '../lib/supabaseClient';
 import { useAuth } from '../hooks/useAuth';
 import { toast } from 'sonner';
 import AppHeader from '../components/AppHeader';
 import {
     Pencil, Trash2, Plus, X, Check, ChevronDown, ChevronRight, Building2,
     Mail, MapPin, Eye, Search, RefreshCw, MoreHorizontal, Filter,
-    Send, CheckCircle2, AlertCircle, PackageCheck, Clock
+    Send, CheckCircle2, AlertCircle, PackageCheck, Clock, KeyRound
 } from 'lucide-react';
 import {
     DropdownMenu,
@@ -43,7 +44,7 @@ const VendorManagement = () => {
     const [address, setAddress] = useState('');
     const [vendors, setVendors] = useState<Vendor[]>([]);
     const [vendorRequests, setVendorRequests] = useState<VendorRequest[]>([]);
-    const { user } = useAuth();
+    const { user, userRole, session } = useAuth();
     const [editingVendor, setEditingVendor] = useState<Vendor | null>(null);
     const [isSaving, setIsSaving] = useState(false);
     const [changingVendorRequest, setChangingVendorRequest] = useState<VendorRequest | null>(null);
@@ -63,7 +64,8 @@ const VendorManagement = () => {
     }, []);
 
     const fetchVendorRequests = async () => {
-        const { data, error } = await supabase
+        const client = userRole === 'super_admin' ? supabaseAdmin : supabase;
+        const { data, error } = await client
             .from('vendor_requests')
             .select(`
                 *,
@@ -85,7 +87,8 @@ const VendorManagement = () => {
     };
 
     const fetchVendors = async () => {
-        const { data, error } = await supabase
+        const client = userRole === 'super_admin' ? supabaseAdmin : supabase;
+        const { data, error } = await client
             .from('vendors')
             .select(`
                 id,
@@ -130,7 +133,8 @@ const VendorManagement = () => {
         }
 
         if (authData.user) {
-            const { error: vendorError } = await supabase
+            const client = userRole === 'super_admin' ? supabaseAdmin : supabase;
+            const { error: vendorError } = await client
                 .from('vendors')
                 .insert([
                     { id: authData.user.id, name, email, address }
@@ -141,7 +145,7 @@ const VendorManagement = () => {
                 return;
             }
 
-            const { error: profileError } = await supabase
+            const { error: profileError } = await client
                 .from('profiles')
                 .upsert({
                     id: authData.user.id,
@@ -170,8 +174,11 @@ const VendorManagement = () => {
         if (!editingVendor) return;
 
         setIsSaving(true);
+        const isPrivileged = userRole === 'admin' || userRole === 'manager' || userRole === 'super_admin';
+        const client = isPrivileged ? supabaseAdmin : supabase;
+
         try {
-            const { error: vendorError } = await supabase
+            const { error: vendorError } = await client
                 .from('vendors')
                 .update({
                     name: editingVendor.name,
@@ -182,7 +189,7 @@ const VendorManagement = () => {
 
             if (vendorError) throw vendorError;
 
-            const { error: profileError } = await supabase
+            const { error: profileError } = await client
                 .from('profiles')
                 .update({
                     full_name: editingVendor.name
@@ -206,7 +213,10 @@ const VendorManagement = () => {
             return;
         }
 
-        const { error: vendorError } = await supabase
+        const isPrivileged = userRole === 'admin' || userRole === 'manager' || userRole === 'super_admin';
+        const client = isPrivileged ? supabaseAdmin : supabase;
+
+        const { error: vendorError } = await client
             .from('vendors')
             .delete()
             .eq('id', vendorId);
@@ -216,7 +226,7 @@ const VendorManagement = () => {
             return;
         }
 
-        const { error: profileError } = await supabase
+        const { error: profileError } = await client
             .from('profiles')
             .delete()
             .eq('id', vendorId);
@@ -234,7 +244,8 @@ const VendorManagement = () => {
     const handleDeleteVendorRequest = async (id: number) => {
         if (!window.confirm('Are you sure you want to delete this vendor request?')) return;
 
-        const { error } = await supabase
+        const client = userRole === 'super_admin' ? supabaseAdmin : supabase;
+        const { error } = await client
             .from('vendor_requests')
             .delete()
             .eq('id', id);
@@ -247,10 +258,29 @@ const VendorManagement = () => {
         }
     };
 
+    const handleAccessAsVendor = async (vendor: Vendor) => {
+        if (userRole !== 'super_admin') {
+            toast.error('Only super admins can access vendor accounts');
+            return;
+        }
+        localStorage.setItem('impersonating_user', JSON.stringify({
+            id: vendor.id,
+            email: vendor.email,
+            full_name: vendor.name,
+            role: 'vendor',
+        }));
+        localStorage.setItem('original_user', JSON.stringify({
+            id: session?.user.id,
+            email: session?.user.email,
+        }));
+        window.location.href = '/vendor-dashboard';
+    };
+
     const handleChangeVendor = async (requestId: number, newVendorId: string) => {
         setIsSaving(true);
+        const client = userRole === 'super_admin' ? supabaseAdmin : supabase;
         try {
-            const { error } = await supabase
+            const { error } = await client
                 .from('vendor_requests')
                 .update({ vendor_id: newVendorId, status: 'sent' })
                 .eq('id', requestId);
@@ -530,6 +560,16 @@ const VendorManagement = () => {
                                                     <Trash2 size={12} />
                                                     Delete
                                                 </button>
+                                                {userRole === 'super_admin' && session?.user.id !== vendor.id && (
+                                                    <button
+                                                        onClick={() => handleAccessAsVendor(vendor)}
+                                                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-600 bg-purple-50 dark:bg-purple-900/20 dark:text-purple-400 rounded-lg hover:bg-purple-100 dark:hover:bg-purple-900/40 transition-colors"
+                                                        title="Access as vendor"
+                                                    >
+                                                        <KeyRound size={12} />
+                                                        Access
+                                                    </button>
+                                                )}
                                             </div>
                                         </div>
                                     )}

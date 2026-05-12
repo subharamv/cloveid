@@ -23,7 +23,7 @@ function getGreeting(): { text: string; icon: typeof Sun } {
 }
 
 const VendorDashboard = () => {
-    const { user, userRole, loading: authLoading } = useAuth();
+    const { user, userRole, loading: authLoading, effectiveUserId } = useAuth();
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const tabParam = searchParams.get('tab');
@@ -36,7 +36,7 @@ const VendorDashboard = () => {
     const [backLogoDataUrl, setBackLogoDataUrl] = useState<string>('');
     const [processingRequest, setProcessingRequest] = useState<any>(null);
     const [searchQuery, setSearchQuery] = useState('');
-    const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'yesterday' | '7days' | '30days' | 'custom'>('all');
+    const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'yesterday' | '7days' | '30days' | 'thisMonth' | 'lastMonth' | 'thisYear' | 'custom'>('all');
     const [customDateStart, setCustomDateStart] = useState('');
     const [customDateEnd, setCustomDateEnd] = useState('');
     const [page, setPage] = useState(1);
@@ -76,7 +76,7 @@ const VendorDashboard = () => {
             const { data: vendorRequestsData, error: vendorRequestsError } = await supabase
                 .from('vendor_requests')
                 .select('*')
-                .eq('vendor_id', user.id)
+                .eq('vendor_id', effectiveUserId)
                 .order('sent_at', { ascending: false })
                 .abortSignal(controller.signal);
 
@@ -442,6 +442,16 @@ const VendorDashboard = () => {
             case '30days':
                 start.setMonth(start.getMonth() - 1);
                 return { start, end: now };
+            case 'thisMonth':
+                start.setDate(1);
+                return { start, end: now };
+            case 'lastMonth':
+                start.setMonth(start.getMonth() - 1, 1);
+                const lastMonthEnd = new Date(start.getFullYear(), start.getMonth() + 1, 0, 23, 59, 59, 999);
+                return { start, end: lastMonthEnd };
+            case 'thisYear':
+                start.setMonth(0, 1);
+                return { start, end: now };
             case 'custom':
                 return {
                     start: customDateStart ? new Date(customDateStart + 'T00:00:00') : null,
@@ -615,7 +625,7 @@ const VendorDashboard = () => {
                                     </div>
                                 </div>
                                 <div className="flex flex-wrap items-center gap-2">
-                                    {(['all', 'today', 'yesterday', '7days', '30days', 'custom'] as const).map((key) => (
+                                    {(['all', 'today', 'yesterday', '7days', '30days', 'thisMonth', 'lastMonth', 'thisYear', 'custom'] as const).map((key) => (
                                         <button
                                             key={key}
                                             onClick={() => setDateFilter(key)}
@@ -625,7 +635,7 @@ const VendorDashboard = () => {
                                                     : 'bg-white dark:bg-gray-900 text-muted-foreground border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
                                             }`}
                                         >
-                                            {key === 'all' ? 'All' : key === 'today' ? 'Today' : key === 'yesterday' ? 'Yesterday' : key === '7days' ? '7 Days' : key === '30days' ? '1 Month' : 'Custom'}
+                                            {key === 'all' ? 'All' : key === 'today' ? 'Today' : key === 'yesterday' ? 'Yesterday' : key === '7days' ? '7 Days' : key === '30days' ? '30 Days' : key === 'thisMonth' ? 'This Month' : key === 'lastMonth' ? 'Last Month' : key === 'thisYear' ? 'This Year' : 'Custom'}
                                         </button>
                                     ))}
                                     {dateFilter === 'custom' && (

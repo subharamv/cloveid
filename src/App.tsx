@@ -31,6 +31,8 @@ import CardCanvasEditor from './pages/CardCanvasEditor';
 import SingleCardTracking from './pages/SingleCardTracking';
 import ResetPassword from './pages/ResetPassword';
 import AdminIssues from './pages/AdminIssues';
+import OrderRequest from './pages/OrderRequest';
+import VendorOrders from './pages/VendorOrders';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { AuthProvider } from './hooks/useAuth';
 
@@ -49,7 +51,7 @@ const App = () => (
             <Route path="/reset-password" element={<ResetPassword />} />
 
             {/* Admin/Manager Protected Routes */}
-            <Route element={<ProtectedRoute allowedRoles={['admin', 'manager']} />}>
+            <Route element={<ProtectedRoute allowedRoles={['admin', 'manager', 'super_admin']} />}>
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/single-card" element={<SingleCard />} />
               <Route path="/bulk-card-import" element={<BulkCardImport />} />
@@ -69,18 +71,20 @@ const App = () => (
               <Route path="/settings/storage" element={<StorageManagement />} />
               <Route path="/settings/drive-storage" element={<DriveStorageManagement />} />
               <Route path="/admin-issues" element={<AdminIssues />} />
+              <Route path="/order-request" element={<OrderRequest />} />
             </Route>
 
             {/* User Protected Routes */}
-            <Route element={<ProtectedRoute allowedRoles={['admin', 'manager', 'user']} />}>
+            <Route element={<ProtectedRoute allowedRoles={['admin', 'manager', 'super_admin', 'user']} />}>
               <Route path="/user-dashboard" element={<UserDashboardPage />} />
               <Route path="/employee-page" element={<EmployeePage />} />
             </Route>
 
             {/* Vendor Protected Routes */}
-            <Route element={<ProtectedRoute allowedRoles={['admin', 'manager', 'vendor']} />}>
+            <Route element={<ProtectedRoute allowedRoles={['admin', 'manager', 'super_admin', 'vendor']} />}>
               <Route path="/vendor-dashboard" element={<VendorDashboard />} />
               <Route path="/batches" element={<BatchManagement />} />
+              <Route path="/vendor-orders" element={<VendorOrders />} />
             </Route>
           </Routes>
         </AuthProvider>

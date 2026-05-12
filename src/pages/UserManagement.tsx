@@ -1,10 +1,23 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase, supabaseAdmin } from '@/lib/supabaseClient';
 import { useAuth } from '@/hooks/useAuth';
 
 import { toast } from 'sonner';
 import AppHeader from '../components/AppHeader';
-import { UserCheck, UserX, Shield, Trash2, Search, Users, UserPlus, UserCog, ChevronDown, ChevronRight, Layers, X } from 'lucide-react';
+import {
+    UserCheck, UserX, Shield, Trash2, Search, Users, UserPlus, UserCog,
+    ChevronDown, ChevronRight, Layers, X, KeyRound, AlertTriangle, CheckCircle
+} from 'lucide-react';
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 interface Profile {
     id: string;
@@ -19,7 +32,7 @@ interface Profile {
 }
 
 const UserManagement = () => {
-    const { session } = useAuth();
+    const { session, userRole, isImpersonating, resetImpersonation } = useAuth();
     const [profiles, setProfiles] = useState<Profile[]>([]);
     const [loading, setLoading] = useState(true);
     const [departmentFilter, setDepartmentFilter] = useState<string>('');
@@ -33,21 +46,32 @@ const UserManagement = () => {
     const [bulkDeptValue, setBulkDeptValue] = useState('');
     const [isBulkSaving, setIsBulkSaving] = useState(false);
     const [allDepartmentNames, setAllDepartmentNames] = useState<string[]>([]);
+    const [accessUser, setAccessUser] = useState<Profile | null>(null);
+    const [impersonating, setImpersonating] = useState(false);
+    const [confirmAction, setConfirmAction] = useState<{
+        type: 'approve' | 'deactivate';
+        profile: Profile;
+    } | null>(null);
 
     useEffect(() => {
         fetchProfiles();
     }, []);
 
     useEffect(() => {
-        supabase.from('departments').select('name').order('name').then(({ data }) => {
-            if (data) setAllDepartmentNames(data.map(d => d.name));
-        });
-    }, []);
+        const fetchDepts = async () => {
+            try {
+                const { data, error } = await (userRole === 'super_admin' ? supabaseAdmin : supabase)
+                    .from('departments').select('name').order('name');
+                if (!error && data) setAllDepartmentNames(data.map(d => d.name));
+            } catch {}
+        };
+        fetchDepts();
+    }, [userRole]);
 
     const fetchProfiles = async () => {
         setLoading(true);
         try {
-            const { data, error } = await supabase
+            const { data, error } = await (userRole === 'super_admin' ? supabaseAdmin : supabase)
                 .from('profiles')
                 .select('*')
                 .order('created_at', { ascending: false });
@@ -56,7 +80,6 @@ const UserManagement = () => {
             const profilesData = data || [];
             setProfiles(profilesData);
 
-            // Fetch card mapping for these profiles by employee_id
             const employeeIds = profilesData.map((p: any) => p.employee_id).filter(Boolean);
             if (employeeIds.length > 0) {
                 const { data: cardDetails } = await supabase
@@ -77,24 +100,109 @@ const UserManagement = () => {
         }
     };
 
-    const handleToggleActive = async (id: string, currentStatus: boolean) => {
-        try {
-            const { error } = await supabase
-                .from('profiles')
-                .update({ is_active: !currentStatus })
-                .eq('id', id);
+    const handleConfirmToggleActive = async () => {
+        if (!confirmAction) return;
+        const { type, profile } = confirmAction;
 
-            if (error) throw error;
-            toast.success(`User ${!currentStatus ? 'approved' : 'deactivated'} successfully`);
+        // Prevent modifying super_admin unless current user is super_admin
+        if (profile.role === 'super_admin' && userRole !== 'super_admin') {
+            toast.error('Only super admins can modify other super admins');
+            setConfirmAction(null);
+            return;
+        }
+
+        const isPrivileged = userRole === 'admin' || userRole === 'manager' || userRole === 'super_admin';
+        const client = isPrivileged ? supabaseAdmin : supabase;
+
+        try {
+            if (type === 'approve') {
+                let emailConfirmed = false;
+
+                // 1. Confirm email via admin API (service_role key, most reliable)
+                try {
+                    const { error: adminError } = await supabaseAdmin.auth.admin.updateUserById(
+                        profile.id,
+                        { email_confirm: true }
+                    );
+                    if (adminError) {
+                        console.warn('Admin API email confirm failed:', adminError.message);
+                    } else {
+                        emailConfirmed = true;
+                    }
+                } catch (adminErr) {
+                    console.warn('Admin API email confirm threw:', adminErr);
+                }
+
+                // 2. Fallback to RPC if admin API didn't work
+                if (!emailConfirmed) {
+                    try {
+                        const { error: rpcError } = await supabaseAdmin.rpc('confirm_user_email', {
+                            user_id: profile.id,
+                        });
+                        if (rpcError) {
+                            console.warn('RPC email confirm also failed:', rpcError.message);
+                        } else {
+                            emailConfirmed = true;
+                        }
+                    } catch (rpcErr) {
+                        console.warn('RPC email confirm threw:', rpcErr);
+                    }
+                }
+
+                // 3. Update profile is_active to true
+                const { error } = await client
+                    .from('profiles')
+                    .update({ is_active: true })
+                    .eq('id', profile.id);
+
+                if (error) throw error;
+
+                if (emailConfirmed) {
+                    toast.success(`${profile.full_name} approved`, {
+                        description: 'Email confirmed - user can now sign in immediately.',
+                        duration: 5000,
+                    });
+                } else {
+                    toast.success(`${profile.full_name} approved`, {
+                        description: 'Profile activated. User can sign in once email is verified.',
+                        duration: 5000,
+                    });
+                }
+            } else {
+                // Deactivate
+                const { error } = await client
+                    .from('profiles')
+                    .update({ is_active: false })
+                    .eq('id', profile.id);
+
+                if (error) throw error;
+
+                toast.warning(`${profile.full_name} deactivated`, {
+                    description: 'User can no longer sign in.',
+                    duration: 5000,
+                });
+            }
+
+            setConfirmAction(null);
             fetchProfiles();
         } catch (error: any) {
-            toast.error(error.message);
+            toast.error(error.message || `Failed to ${type} user`);
+            setConfirmAction(null);
         }
     };
 
-    const handleRoleChange = async (id: string, newRole: string) => {
+    const handleRoleChange = async (id: string, newRole: string, currentRole: string) => {
         try {
-            const { error } = await supabase
+            // Prevent modifying super_admin unless current user is super_admin
+            if (currentRole === 'super_admin' && userRole !== 'super_admin') {
+                toast.error('Only super admins can change roles of other super admins');
+                return;
+            }
+
+            const isPrivileged = userRole === 'admin' || userRole === 'manager' || userRole === 'super_admin';
+            const client = isPrivileged ? supabaseAdmin : supabase;
+
+            const { error } = await client
                 .from('profiles')
                 .update({ role: newRole })
                 .eq('id', id);
@@ -107,13 +215,22 @@ const UserManagement = () => {
         }
     };
 
-    const handleDeleteUser = async (id: string, fullName: string) => {
+    const handleDeleteUser = async (id: string, fullName: string, role: string) => {
+        // Prevent deleting super_admin unless current user is super_admin
+        if (role === 'super_admin' && userRole !== 'super_admin') {
+            toast.error('Only super admins can delete other super admins');
+            return;
+        }
+
         if (!window.confirm(`Are you sure you want to delete user ${fullName}? This will only delete their profile.`)) {
             return;
         }
 
         try {
-            const { error } = await supabase
+            const isPrivileged = userRole === 'admin' || userRole === 'manager' || userRole === 'super_admin';
+            const client = isPrivileged ? supabaseAdmin : supabase;
+
+            const { error } = await client
                 .from('profiles')
                 .delete()
                 .eq('id', id);
@@ -123,6 +240,36 @@ const UserManagement = () => {
             fetchProfiles();
         } catch (error: any) {
             toast.error(error.message);
+        }
+    };
+
+    const handleAccessAsUser = async (profile: Profile) => {
+        if (userRole !== 'super_admin') {
+            toast.error('Only super admins can access other user accounts');
+            return;
+        }
+        setAccessUser(profile);
+        setImpersonating(true);
+        localStorage.setItem('impersonating_user', JSON.stringify({
+            id: profile.id,
+            email: profile.email,
+            full_name: profile.full_name,
+            role: profile.role,
+        }));
+        localStorage.setItem('original_user', JSON.stringify({
+            id: session?.user.id,
+            email: session?.user.email,
+        }));
+        window.location.href = '/user-dashboard';
+    };
+
+    const handleResetToOriginal = () => {
+        const original = localStorage.getItem('original_user');
+        if (original) {
+            const originalUser = JSON.parse(original);
+            localStorage.removeItem('impersonating_user');
+            localStorage.removeItem('original_user');
+            window.location.href = '/user-management';
         }
     };
 
@@ -154,7 +301,10 @@ const UserManagement = () => {
         setIsBulkSaving(true);
         try {
             const ids = Array.from(selectedIds);
-            const { error } = await supabase.from('profiles').update({ department: bulkDeptValue }).in('id', ids);
+            const isPrivileged = userRole === 'admin' || userRole === 'manager' || userRole === 'super_admin';
+            const client = isPrivileged ? supabaseAdmin : supabase;
+
+            const { error } = await client.from('profiles').update({ department: bulkDeptValue }).in('id', ids);
             if (error) throw error;
             toast.success(`Updated ${ids.length} user(s) to department "${bulkDeptValue}"`);
             setSelectedIds(new Set());
@@ -228,15 +378,17 @@ const UserManagement = () => {
             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{profile.department || '—'}</td>
             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400 font-mono">{cardMap[profile.employee_id] || '-'}</td>
             <td className="px-6 py-4 whitespace-nowrap">
-                <select
-                    value={profile.role}
-                    onChange={(e) => handleRoleChange(profile.id, e.target.value)}
-                    className="bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white text-xs rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:border-orange-400 p-1.5"
-                >
+                    <select
+                        value={profile.role}
+                        onChange={(e) => handleRoleChange(profile.id, e.target.value, profile.role)}
+                        className="bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white text-xs rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:border-orange-400 p-1.5"
+                        disabled={profile.role === 'super_admin' && userRole !== 'super_admin'}
+                    >
                     <option value="user">User</option>
                     <option value="admin">Admin</option>
                     <option value="manager">Manager</option>
                     <option value="vendor">Vendor</option>
+                    <option value="super_admin">Super Admin</option>
                 </select>
             </td>
             <td className="px-6 py-4 whitespace-nowrap">
@@ -252,25 +404,53 @@ const UserManagement = () => {
             <td className="px-6 py-4 whitespace-nowrap text-right">
                 <div className="flex items-center justify-end gap-1.5">
                     <button
-                        onClick={() => handleToggleActive(profile.id, profile.is_active)}
+                        onClick={() => setConfirmAction({
+                            type: profile.is_active ? 'deactivate' : 'approve',
+                            profile
+                        })}
                         className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                            profile.is_active
-                                ? 'bg-amber-50 text-amber-700 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-400 dark:hover:bg-amber-900/40'
-                                : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-900/20 dark:text-emerald-400 dark:hover:bg-emerald-900/40'
+                            profile.role === 'super_admin' && userRole !== 'super_admin'
+                                ? 'bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-600 cursor-not-allowed'
+                                : profile.is_active
+                                    ? 'bg-amber-50 text-amber-700 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-400 dark:hover:bg-amber-900/40'
+                                    : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-900/20 dark:text-emerald-400 dark:hover:bg-emerald-900/40'
                         }`}
-                        title={profile.is_active ? 'Deactivate' : 'Approve'}
+                        title={
+                            profile.role === 'super_admin' && userRole !== 'super_admin'
+                                ? 'Only super admins can modify super admins'
+                                : profile.is_active ? 'Deactivate' : 'Approve'
+                        }
+                        disabled={profile.role === 'super_admin' && userRole !== 'super_admin'}
                     >
                         {profile.is_active ? <UserX size={14} /> : <UserCheck size={14} />}
                         <span>{profile.is_active ? 'Disable' : 'Approve'}</span>
                     </button>
                     <button
-                        onClick={() => handleDeleteUser(profile.id, profile.full_name)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-red-50 text-red-700 rounded-lg text-xs font-medium hover:bg-red-100 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/40 transition-colors"
-                        title="Delete User"
+                        onClick={() => handleDeleteUser(profile.id, profile.full_name, profile.role)}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                            profile.role === 'super_admin' && userRole !== 'super_admin'
+                                ? 'bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-600 cursor-not-allowed'
+                                : 'bg-red-50 text-red-700 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/40'
+                        }`}
+                        title={
+                            profile.role === 'super_admin' && userRole !== 'super_admin'
+                                ? 'Only super admins can delete super admins'
+                                : 'Delete User'
+                        }
+                        disabled={profile.role === 'super_admin' && userRole !== 'super_admin'}
                     >
                         <Trash2 size={14} />
                         Delete
                     </button>
+                    {userRole === 'super_admin' && session?.user.id !== profile.id && (
+                        <button
+                            onClick={() => handleAccessAsUser(profile)}
+                            className="p-2 text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded-lg transition-colors"
+                            title="Access as this user"
+                        >
+                            <KeyRound size={14} />
+                        </button>
+                    )}
                 </div>
             </td>
         </tr>
@@ -354,6 +534,8 @@ const UserManagement = () => {
         <div className="relative flex h-auto min-h-screen w-full flex-col bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-950 dark:to-gray-900">
             <div className="layout-container flex h-full grow flex-col">
                 <AppHeader />
+
+                
 
                 <main className="flex-1 px-4 py-6 sm:px-6 lg:px-10">
                     <div className="mx-auto max-w-7xl">
@@ -534,6 +716,52 @@ const UserManagement = () => {
                     </div>
                 </div>
             )}
+
+            {/* Confirmation Dialog for Approve/Deactivate */}
+            <AlertDialog open={!!confirmAction} onOpenChange={(open) => !open && setConfirmAction(null)}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle className="flex items-center gap-2">
+                            {confirmAction?.type === 'approve' ? (
+                                <><CheckCircle size={20} className="text-emerald-500" /> Approve User</>
+                            ) : (
+                                <><AlertTriangle size={20} className="text-amber-500" /> Deactivate User</>
+                            )}
+                        </AlertDialogTitle>
+                        <AlertDialogDescription className="space-y-2 pt-2">
+                            {confirmAction?.type === 'approve' ? (
+                                <>
+                                    <p>
+                                        This will <strong>approve</strong> <span className="font-semibold text-foreground">{confirmAction?.profile?.full_name}</span>
+                                        {' '}and confirm their email address.
+                                    </p>
+                                    <p className="text-xs text-muted-foreground/80 bg-muted p-2 rounded-md">
+                                        The user will be able to sign in immediately after approval.
+                                    </p>
+                                </>
+                            ) : (
+                                <>
+                                    <p>
+                                        This will <strong>deactivate</strong> <span className="font-semibold text-foreground">{confirmAction?.profile?.full_name}</span>.
+                                    </p>
+                                    <p className="text-xs text-muted-foreground/80 bg-muted p-2 rounded-md">
+                                        The user will no longer be able to sign in. Their data will be preserved.
+                                    </p>
+                                </>
+                            )}
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={handleConfirmToggleActive}
+                            className={confirmAction?.type === 'deactivate' ? 'bg-red-600 hover:bg-red-700 text-white' : ''}
+                        >
+                            {confirmAction?.type === 'approve' ? 'Approve User' : 'Deactivate User'}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     );
 };

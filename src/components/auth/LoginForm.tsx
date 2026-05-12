@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import { toast } from 'sonner';
 import { Eye, EyeOff, Loader2, AlertCircle } from 'lucide-react';
 
 interface LoginFormProps {
@@ -27,11 +28,30 @@ export default function LoginForm({ onForgotPassword }: LoginFormProps) {
       });
 
       if (loginError) {
-        setError(loginError.message);
-        if (loginError.message.includes('refresh_token_not_found') ||
-            loginError.message.includes('Invalid login credentials')) {
+        const msg = loginError.message;
+
+        if (msg.includes('Email not confirmed') || msg.includes('email_not_confirmed')) {
+          setError('Your account is pending approval. Please contact HR to activate your account.');
+          toast.info('Account pending approval', {
+            description: 'Your email has not been verified yet. An administrator needs to approve your account before you can sign in.',
+            duration: 5000,
+          });
           localStorage.removeItem('auth_cache');
+        } else if (loginError.status === 429) {
+          setError('Too many login attempts. Please wait a moment and try again.');
+          toast.error('Too many attempts', {
+            description: 'Please wait a moment before trying again.',
+          });
+        } else if (msg.includes('Invalid login credentials')) {
+          setError('Invalid email or password. Please try again.');
+          localStorage.removeItem('auth_cache');
+        } else if (msg.includes('refresh_token_not_found')) {
+          localStorage.removeItem('auth_cache');
+          setError('Session expired. Please sign in again.');
+        } else {
+          setError(msg);
         }
+
         setIsSubmitting(false);
         return;
       }
@@ -62,17 +82,21 @@ export default function LoginForm({ onForgotPassword }: LoginFormProps) {
 
       const { data: profile, error: profileError } = await fetchProfileWithTimeout();
 
-      if (profileError) {
-        const role = loginData.user.user_metadata?.role;
-        if (!role) {
-          setError('Could not determine user role. Please try again.');
-          setIsSubmitting(false);
-          return;
-        }
+      if (profileError || !profile) {
+        setError('Your account is not fully set up. Please contact HR for assistance.');
+        localStorage.removeItem('auth_cache');
+        await supabase.auth.signOut();
+        setIsSubmitting(false);
+        return;
       }
 
-      if (profile && profile.is_active === false) {
-        setError('Your account is pending approval from HR.');
+      if (profile.is_active === false) {
+        setError('Your account is pending approval from HR. Please wait for an administrator to approve your account.');
+        toast.info('Account pending approval', {
+          description: 'Your account has not been approved yet. Please contact HR to activate your account.',
+          duration: 6000,
+        });
+        localStorage.removeItem('auth_cache');
         await supabase.auth.signOut();
         setIsSubmitting(false);
         return;

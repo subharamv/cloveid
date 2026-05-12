@@ -61,7 +61,7 @@ function getGreeting(): { text: string; icon: typeof Sun } {
 const UserDashboardPage = () => {
     const navigate = useNavigate();
     const location = useLocation();
-    const { user, profile, userRole, logout, clearSession, loading: authLoading } = useAuth();
+    const { user, profile, userRole, logout, clearSession, loading: authLoading, effectiveUserId } = useAuth();
     const [requests, setRequests] = useState<Request[]>([]);
     const [selectedRequest, setSelectedRequest] = useState<Request | null>(null);
     const [loading, setLoading] = useState(true);
@@ -69,13 +69,13 @@ const UserDashboardPage = () => {
 
     useEffect(() => {
         const getRequests = async () => {
-            if (!authLoading && user && (userRole === 'user' || userRole === 'admin' || userRole === 'manager')) {
+            if (!authLoading && user && (userRole === 'user' || userRole === 'admin' || userRole === 'manager' || userRole === 'super_admin')) {
                 setLoading(true);
                 try {
                     const { data: userRequests, error } = await supabase
                         .from('requests')
                         .select('*')
-                        .eq('user_id', user.id)
+                        .eq('user_id', effectiveUserId)
                         .order('created_at', { ascending: false });
 
                     if (error) {
