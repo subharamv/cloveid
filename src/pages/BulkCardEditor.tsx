@@ -25,6 +25,9 @@ import { imageToDataUrl, compressImage } from '@/lib/utils';
 import AppHeader from '../components/AppHeader';
 import { supabase } from '@/lib/supabaseClient';
 import { ProgressBar } from '@/components/ProgressBar';
+import StepWizard from '@/components/StepWizard';
+import { uploadRawPhotoToDrive } from '@/lib/googleDriveUpload';
+import CardSaveProgress from '@/components/CardSaveProgress';
 
 const BulkCardEditor: React.FC = () => {
     const location = useLocation();
@@ -39,6 +42,7 @@ const BulkCardEditor: React.FC = () => {
     const [frontLogoDataUrl, setFrontLogoDataUrl] = useState<string>('');
     const [backLogoDataUrl, setBackLogoDataUrl] = useState<string>('');
     const [saveProgress, setSaveProgress] = useState(0);
+    const [saveMessage, setSaveMessage] = useState('');
     const [showSaveProgress, setShowSaveProgress] = useState(false);
     const [isLoadingImage, setIsLoadingImage] = useState(false);
 
@@ -54,6 +58,8 @@ const BulkCardEditor: React.FC = () => {
         countryCode: '+91',
         photo: null,
     });
+    const employeeRef = useRef(employee);
+    employeeRef.current = employee;
 
     useEffect(() => {
         const processImage = async (imageUrl: string) => {
@@ -288,7 +294,7 @@ const BulkCardEditor: React.FC = () => {
                 const key = String(header || '').trim().toLowerCase();
                 const employeeKey = headerMapping[key];
                 if (employeeKey) {
-                    newEmployee[employeeKey] = rowData[index];
+                    newEmployee[employeeKey] = rowData[index] as never;
                 }
                 if (key === 'photo' || key === 'image' || key === 'photo (upload)') {
                     imageUrl = rowData[index];
@@ -344,7 +350,7 @@ const BulkCardEditor: React.FC = () => {
         shadow: 0,
     });
 
-    const [activeTab, setActiveTab] = useState<'details' | 'photo' | 'enhance'>('details');
+    const [wizardStep, setWizardStep] = useState(0);
 
     // track last object URL to revoke it later
     const lastObjectUrlRef = useRef<string | null>(null);
@@ -497,6 +503,8 @@ const BulkCardEditor: React.FC = () => {
 
                     setEditor(newEditorState);
                     setEmployee(prev => ({ ...prev, photo: fileToUpload }));
+                    uploadRawPhotoToDrive(file, employeeRef.current.fullName, employeeRef.current.employeeId)
+                        .catch((err) => console.warn('Raw photo Drive backup failed:', err));
                     setPhotoUrl(img.src);
                     setIsLoadingImage(false);
 
@@ -754,39 +762,36 @@ const BulkCardEditor: React.FC = () => {
 
         setIsSaving(true);
         setShowSaveProgress(true);
-        setSaveProgress(0);
+        setSaveProgress(5);
+        setSaveMessage('Preparing card...');
 
         try {
             const canvas = canvasRef.current;
             let updatedEmployee = { ...employee };
 
-            // Step 1: Process photo
             setSaveProgress(10);
+            setSaveMessage('Generating card images...');
             if (canvas) {
-                // Ensure the canvas is up to date with latest transforms
                 drawEditor();
                 const photoDataUrl = canvas.toDataURL('image/png', 1.0);
                 updatedEmployee.photo = photoDataUrl;
             }
 
-            // Step 2: Generate ZIP
-            setSaveProgress(35);
+            setSaveProgress(30);
+            setSaveMessage('Creating ZIP file...');
             const blob = await generateZip();
 
-            // Step 3: Upload ZIP to active storage provider (Supabase or Google Drive)
-            setSaveProgress(60);
+            setSaveProgress(45);
+            setSaveMessage('ZIP ready — uploading...');
             const zipFileName = `${employee.fullName.replace(/ /g, '_')}_${employee.employeeId}_ID_Card.zip`;
             const finalZipUrl = await uploadZip(blob, zipFileName, 'batch', batchId || undefined);
 
-            // Filter out broken fetch delivery URLs - don't store them
             const safeFotoUrl = photoUrl && !photoUrl.includes('image/fetch/') ? photoUrl : null;
-
-            // Update updatedEmployee with photoUrl and zipUrl
             updatedEmployee.photo_url = safeFotoUrl;
             updatedEmployee.zip_url = finalZipUrl;
 
-            // Step 4: Update database if cardId exists
-            setSaveProgress(85);
+            setSaveProgress(80);
+            setSaveMessage('Saving card details...');
             if (cardId) {
                 const headerMapping: { [key: string]: keyof Employee } = {
                     'full name': 'fullName',
@@ -833,9 +838,9 @@ const BulkCardEditor: React.FC = () => {
                 }
             }
 
-            // Step 5: Finalize
             setSaveProgress(100);
-            await new Promise(resolve => setTimeout(resolve, 500)); // Show 100% briefly
+            setSaveMessage('Saved successfully!');
+            await new Promise(resolve => setTimeout(resolve, 800));
 
             toast.success('Changes saved! Returning to management...');
             navigate('/import-management', {
@@ -855,10 +860,10 @@ const BulkCardEditor: React.FC = () => {
         } catch (error) {
             console.error('Error in handleSaveAndBack:', error);
             toast.error(`Failed to save changes: ${error instanceof Error ? error.message : 'Please try again.'}`);
-        } finally {
-            setIsSaving(false);
             setShowSaveProgress(false);
             setSaveProgress(0);
+        } finally {
+            setIsSaving(false);
         }
     };
 
@@ -969,52 +974,91 @@ const BulkCardEditor: React.FC = () => {
                             />
                             <IDCardBack ref={backCardRef} employee={employee} logoSrc={backLogoDataUrl} />
                         </div>
+                        <CardSaveProgress isVisible={showSaveProgress} progress={saveProgress} message={saveMessage} />
                     </div>
 
-                    {/* Right: Tabbed Controls Panel */}
-                    <div className="bg-white dark:bg-background-dark rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 overflow-hidden self-start">
-                        {/* Tab Bar */}
-                        <div className="flex border-b border-gray-200 dark:border-gray-700">
-                            {([
-                                { key: 'details', icon: 'badge', label: 'Details' },
-                                { key: 'photo', icon: 'photo_camera', label: 'Photo' },
-                                { key: 'enhance', icon: 'tune', label: 'Enhance' },
-                            ] as const).map(tab => (
-                                <button
-                                    key={tab.key}
-                                    onClick={() => setActiveTab(tab.key)}
-                                    className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-3 text-xs sm:text-sm font-medium transition-colors border-b-2 ${
-                                        activeTab === tab.key
-                                            ? 'border-primary text-primary'
-                                            : 'border-transparent text-muted-foreground hover:text-foreground'
-                                    }`}
-                                >
-                                    <span className="material-symbols-outlined text-lg">{tab.icon}</span>
-                                    {tab.label}
-                                </button>
-                            ))}
-                        </div>
-
-                        {/* Tab Content */}
-                        <div className="p-4">
-                            {activeTab === 'details' && (
+                    {/* Right: Step Wizard */}
+                    <div className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 overflow-hidden self-start">
+                        <StepWizard
+                            steps={[
+                                { label: 'Details', icon: 'badge' },
+                                { label: 'Photo', icon: 'photo_camera' },
+                                { label: 'Finalise', icon: 'tune' },
+                            ]}
+                            currentStep={wizardStep}
+                            onStepClick={setWizardStep}
+                        >
+                            {/* Step 0 — Employee Details */}
+                            <div className="space-y-5">
                                 <EmployeeForm employee={employee} onEmployeeChange={setEmployee} />
-                            )}
-                            {activeTab === 'photo' && (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        if (!employee.fullName.trim() || !employee.employeeId.trim()) {
+                                            toast.error('Please fill in Full Name and Employee ID to continue');
+                                            return;
+                                        }
+                                        setWizardStep(1);
+                                    }}
+                                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-r from-orange-400 to-orange-600 text-white text-sm font-semibold hover:opacity-90 transition-opacity"
+                                >
+                                    Continue to Photo
+                                    <span className="material-symbols-outlined text-base">arrow_forward</span>
+                                </button>
+                            </div>
+
+                            {/* Step 1 — Photo Upload */}
+                            <div className="space-y-3">
                                 <PhotoUpload
                                     onPhotoSelect={handlePhotoSelect}
                                     onHideUploadNote={handleHideUploadNote}
                                     showUploadNote={showUploadNote}
-                                    editor={editor}
-                                    onZoomIn={handleZoomIn}
-                                    onZoomOut={handleZoomOut}
-                                    onRotateLeft={handleRotateLeft}
-                                    onRotateRight={handleRotateRight}
-                                    onReset={handleResetPos}
                                     isLoadingImage={isLoadingImage}
                                 />
-                            )}
-                            {activeTab === 'enhance' && (
+                                {editor.img && (
+                                    <div className="border-t border-gray-100 dark:border-gray-800 pt-3 space-y-2">
+                                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Position &amp; Zoom</p>
+                                        <div className="flex gap-1.5 flex-wrap">
+                                            <button onClick={handleZoomIn} disabled={!editor.img} className="flex-1 min-w-[36px] px-2 py-2 text-sm font-bold bg-primary hover:bg-primary/90 disabled:opacity-40 text-white rounded-lg transition-colors">＋</button>
+                                            <button onClick={handleZoomOut} disabled={!editor.img} className="flex-1 min-w-[36px] px-2 py-2 text-sm font-bold bg-primary hover:bg-primary/90 disabled:opacity-40 text-white rounded-lg transition-colors">−</button>
+                                            <button onClick={handleRotateLeft} disabled={!editor.img} className="flex-1 min-w-[36px] px-2 py-2 text-sm bg-primary hover:bg-primary/90 disabled:opacity-40 text-white rounded-lg transition-colors">⟲</button>
+                                            <button onClick={handleRotateRight} disabled={!editor.img} className="flex-1 min-w-[36px] px-2 py-2 text-sm bg-primary hover:bg-primary/90 disabled:opacity-40 text-white rounded-lg transition-colors">⟳</button>
+                                            <button onClick={handleResetPos} disabled={!editor.img} className="flex-1 min-w-[36px] px-2 py-2 text-xs bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 disabled:opacity-40 text-gray-800 dark:text-gray-200 rounded-lg transition-colors">Reset</button>
+                                        </div>
+                                        <input
+                                            type="range" min="0.5" max="3" step="0.01"
+                                            value={editor.scale}
+                                            onChange={(e) => setEditor(prev => ({ ...prev, scale: parseFloat(e.target.value) }))}
+                                            className="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full appearance-none cursor-pointer accent-primary"
+                                        />
+                                        <div className="flex justify-between text-xs text-muted-foreground">
+                                            <span>Zoom: {editor.scale.toFixed(2)}x</span>
+                                            <span>Rotation: {Math.round((editor.rotation * 180) / Math.PI)}°</span>
+                                        </div>
+                                    </div>
+                                )}
+                                <div className="flex gap-2 pt-1">
+                                    <button
+                                        type="button"
+                                        onClick={() => setWizardStep(0)}
+                                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                                    >
+                                        <span className="material-symbols-outlined text-base">arrow_back</span>
+                                        Back
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setWizardStep(2)}
+                                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-gradient-to-r from-orange-400 to-orange-600 text-white text-sm font-semibold hover:opacity-90 transition-opacity"
+                                    >
+                                        Finalise
+                                        <span className="material-symbols-outlined text-base">arrow_forward</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Step 2 — Enhance & Save */}
+                            <div className="space-y-4">
                                 <ImageAdjustments
                                     brightness={filters.brightness}
                                     contrast={filters.contrast}
@@ -1028,47 +1072,62 @@ const BulkCardEditor: React.FC = () => {
                                     onResetFilters={handleResetFilters}
                                     hasImage={!!editor.img}
                                 />
-                            )}
-                        </div>
-
-                        {/* Actions Footer */}
-                        <div className="p-4 border-t border-gray-200 dark:border-gray-700">
-                            <div className="flex flex-wrap gap-3">
+                                <div className="border-t border-gray-100 dark:border-gray-800 pt-4 space-y-2">
+                                    <button
+                                        type="button"
+                                        onClick={handleSaveAndBack}
+                                        disabled={isSaving}
+                                        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-r from-orange-400 to-orange-600 text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-60"
+                                    >
+                                        {isSaving ? (
+                                            <>
+                                                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                                Saving...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <span className="material-symbols-outlined text-base">save</span>
+                                                Save &amp; Back
+                                            </>
+                                        )}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleDownload}
+                                        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                                    >
+                                        <span className="material-symbols-outlined text-base">download</span>
+                                        Download ZIP
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => navigate(-1)}
+                                        className="w-full py-2 rounded-xl border border-red-200 dark:border-red-900/30 text-xs font-medium text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
                                 <button
-                                    onClick={handleDownload}
-                                    className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-gray-100 dark:bg-gray-800 px-4 py-2.5 text-sm font-medium text-gray-900 dark:text-white transition-colors hover:bg-gray-200 dark:hover:bg-gray-700"
+                                    type="button"
+                                    onClick={() => setWizardStep(1)}
+                                    className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
                                 >
-                                    <span className="material-symbols-outlined text-lg">download</span>
-                                    Download ZIP
-                                </button>
-                                <button
-                                    onClick={handleSaveAndBack}
-                                    className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-primary/90"
-                                >
-                                    <span className="material-symbols-outlined text-lg">save</span>
-                                    Save & Back
-                                </button>
-                                <button
-                                    onClick={() => navigate(-1)}
-                                    className="flex-1 flex items-center justify-center gap-2 rounded-lg border border-red-200 dark:border-red-900/30 px-4 py-2.5 text-sm font-medium text-red-600 dark:text-red-400 transition-colors hover:bg-red-50 dark:hover:bg-red-900/20"
-                                >
-                                    <span className="material-symbols-outlined text-lg">close</span>
-                                    Cancel
+                                    <span className="material-symbols-outlined text-sm">arrow_back</span>
+                                    Back to Photo
                                 </button>
                             </div>
-                        </div>
+                        </StepWizard>
                     </div>
                 </div>
             </main>
 
-            {modal.isOpen && (
-                <Modal
-                    type={modal.type}
-                    title={modal.title}
-                    message={modal.message}
-                    onClose={() => setModal(prev => ({ ...prev, isOpen: false }))}
-                />
-            )}
+            <Modal
+                isOpen={modal.isOpen}
+                type={modal.type}
+                title={modal.title}
+                message={modal.message}
+                onClose={() => setModal(prev => ({ ...prev, isOpen: false }))}
+            />
         </div>
     );
 };

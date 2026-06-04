@@ -12,6 +12,7 @@ import cloveLogo from '@/assets/CLOVE LOGO BLACK.png';
 import backLogoSvg from '@/assets/logo svg.png';
 import html2canvas from 'html2canvas';
 import JSZip from 'jszip';
+import { deleteDriveFile, extractDriveFileId } from '@/lib/googleDriveFiles';
 
 const PAGE_SIZES = [10, 20, 50];
 
@@ -192,6 +193,9 @@ const SingleCardTracking = () => {
     const handleDelete = async (id: number) => {
         if (!window.confirm('Are you sure you want to delete this card?')) return;
         try {
+            const card = cards.find(c => c.id === id);
+            const fileId = extractDriveFileId(card?.zip_url);
+            if (fileId) deleteDriveFile(fileId).catch(err => console.warn('Drive delete failed:', err));
             const { error } = await supabase.from('card_details').delete().eq('id', id);
             if (error) throw error;
             toast.success('Card deleted');
@@ -205,6 +209,12 @@ const SingleCardTracking = () => {
         if (selectedRows.size === 0) return;
         if (!window.confirm(`Delete ${selectedRows.size} selected card(s)?`)) return;
         const ids = Array.from(selectedRows);
+        cards.forEach(card => {
+            if (selectedRows.has(card.id)) {
+                const fileId = extractDriveFileId(card.zip_url);
+                if (fileId) deleteDriveFile(fileId).catch(err => console.warn('Drive delete failed:', err));
+            }
+        });
         const { error } = await supabase.from('card_details').delete().in('id', ids);
         if (error) { toast.error('Failed to delete cards'); return; }
         toast.success(`${ids.length} card(s) deleted`);
@@ -263,6 +273,24 @@ const SingleCardTracking = () => {
         } else {
             toast.success('Card marked as collected!');
             setCards(prev => prev.map(c => c.id === id ? { ...c, print_status: 'collected' } : c));
+        }
+    };
+
+    const handlePrintCompleted = async () => {
+        if (selectedRows.size === 0) { toast.error('Please select at least one card.'); return; }
+        setIsDownloading(true);
+        try {
+            const ids = Array.from(selectedRows);
+            await Promise.all(ids.map(id =>
+                supabase.from('card_details').update({ print_status: 'printed', updated_at: new Date().toISOString() }).eq('id', id)
+            ));
+            setCards(prev => prev.map(c => ids.includes(c.id) ? { ...c, print_status: 'printed' } : c));
+            toast.success(`${ids.length} card(s) marked as printed`);
+            setSelectedRows(new Set());
+        } catch {
+            toast.error('Failed to mark as printed');
+        } finally {
+            setIsDownloading(false);
         }
     };
 
@@ -518,6 +546,15 @@ const SingleCardTracking = () => {
                                     >
                                         <Send size={15} />
                                         Send to Print ({selectedRows.size})
+                                    </button>
+                                    <button
+                                        onClick={handlePrintCompleted}
+                                        disabled={isDownloading}
+                                        title="Mark as printed without sending to vendor (offline/out-of-network)"
+                                        className="inline-flex items-center gap-1.5 px-4 py-2 bg-green-500 text-white rounded-xl text-sm font-medium disabled:bg-gray-300 dark:disabled:bg-gray-600 disabled:text-gray-500 hover:bg-green-600 transition-colors"
+                                    >
+                                        <CheckCircle2 size={15} />
+                                        Print Completed
                                     </button>
                                 </div>
                             )}

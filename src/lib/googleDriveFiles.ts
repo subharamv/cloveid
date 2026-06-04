@@ -59,6 +59,22 @@ export async function searchDriveFiles(query: string): Promise<DriveFile[]> {
   return (data as DriveListResult).files;
 }
 
+/** Extract a Drive file ID from a download URL or view URL. Returns null if not a Drive URL. */
+export function extractDriveFileId(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    // https://drive.google.com/uc?id=FILE_ID&export=download
+    const id = parsed.searchParams.get('id');
+    if (id) return id;
+    // https://drive.google.com/file/d/FILE_ID/view
+    const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function deleteDriveFile(fileId: string): Promise<void> {
   const { data: { session } } = await supabase.auth.getSession();
   const token = session?.access_token ?? SUPABASE_ANON_KEY;

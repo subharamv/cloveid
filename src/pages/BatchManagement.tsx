@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '@/lib/supabaseClient';
+import { deleteDriveFile, extractDriveFileId } from '@/lib/googleDriveFiles';
 import AppHeader from '../components/AppHeader';
 import { toast } from 'sonner';
 import {
@@ -307,6 +308,8 @@ const BatchManagement = () => {
   const handleDeleteCard = async (card: any) => {
     if (!window.confirm('Delete this card?')) return;
     try {
+      const fileId = extractDriveFileId(card.zip_url);
+      if (fileId) deleteDriveFile(fileId).catch(err => console.warn('Drive delete failed:', err));
       const { error } = await supabase.from('id_cards').delete().eq('id', card.card_id);
       if (error) throw error;
       toast.success('Card deleted');
@@ -322,6 +325,11 @@ const BatchManagement = () => {
   const handleDeleteBatch = async (batchId: string) => {
     if (!window.confirm('Delete this entire batch? This cannot be undone.')) return;
     try {
+      const cards = batchCards[batchId] || [];
+      cards.forEach(card => {
+        const fileId = extractDriveFileId(card.zip_url);
+        if (fileId) deleteDriveFile(fileId).catch(err => console.warn('Drive delete failed:', err));
+      });
       const { error: cardsErr } = await supabase.from('id_cards').delete().eq('batch_id', batchId);
       if (cardsErr) throw cardsErr;
       const { error: batchErr } = await supabase.from('card_batches').delete().eq('batch_id', batchId);
@@ -334,12 +342,44 @@ const BatchManagement = () => {
     }
   };
 
+  const handlePrintCompleted = async (batchId: string) => {
+    const sel = getSelected(batchId);
+    if (sel.size === 0) { toast.error('No cards selected'); return; }
+    const ids = Array.from(sel).map(Number);
+    try {
+      await Promise.all(ids.map(id =>
+        supabase.from('id_cards').update({ status: 'printed', print_status: 'printed', updated_at: new Date().toISOString() }).eq('id', id)
+      ));
+      const allCards = batchCards[batchId] || [];
+      const remaining = allCards.filter(c =>
+        !sel.has(String(c.card_id)) &&
+        !['printed', 'ready_to_collect', 'collected'].includes(c.print_status)
+      );
+      if (remaining.length === 0) {
+        await supabase.from('card_batches').update({ status: 'completed' }).eq('batch_id', batchId);
+        setBatches(prev => prev.map(b => b.batch_id === batchId ? { ...b, status: 'completed' } : b));
+      }
+      toast.success(`${sel.size} card(s) marked as printed`);
+      setSelected(batchId, new Set());
+      fetchBatchCards(batchId, true);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to mark as printed');
+    }
+  };
+
   const handleDeleteSelected = async (batchId: string) => {
     const sel = getSelected(batchId);
     if (sel.size === 0) { toast.error('No cards selected'); return; }
     if (!window.confirm(`Delete ${sel.size} selected card(s)?`)) return;
     try {
       const ids = Array.from(sel).map(Number);
+      const cards = batchCards[batchId] || [];
+      cards.forEach(card => {
+        if (sel.has(String(card.card_id))) {
+          const fileId = extractDriveFileId(card.zip_url);
+          if (fileId) deleteDriveFile(fileId).catch(err => console.warn('Drive delete failed:', err));
+        }
+      });
       const { error } = await supabase.from('id_cards').delete().in('id', ids);
       if (error) throw error;
       toast.success(`Deleted ${sel.size} card(s)`);
@@ -704,6 +744,12 @@ const BatchManagement = () => {
                                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-500 text-white hover:bg-blue-600 transition-colors disabled:opacity-50">
                                   {isDownloading ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
                                   Send to Print
+                                </button>
+                                <button onClick={() => handlePrintCompleted(batch.batch_id)} disabled={isDownloading}
+                                  title="Mark as printed without sending to vendor (offline/out-of-network)"
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-green-500 text-white hover:bg-green-600 transition-colors disabled:opacity-50">
+                                  <CheckCircle2 size={13} />
+                                  Print Completed
                                 </button>
                                 <button onClick={() => handleDeleteSelected(batch.batch_id)}
                                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-red-500 text-white hover:bg-red-600 transition-colors">

@@ -44,6 +44,44 @@ export async function uploadCardImageToDrive(
   return { fileId: data.fileId, fileUrl: data.fileUrl, downloadUrl: data.downloadUrl };
 }
 
+export async function uploadRawPhotoToDrive(
+  photoFile: File,
+  fullName: string,
+  employeeId: string,
+): Promise<DriveUploadResult> {
+  const ext = photoFile.name.split('.').pop() || 'jpg';
+  const safeName = fullName.trim().replace(/\s+/g, '_').toUpperCase();
+  const safeId = employeeId.trim().toUpperCase();
+  const fileName = safeName && safeId ? `${safeName}_${safeId}.${ext}` : photoFile.name;
+
+  const formData = new FormData();
+  formData.append('file', photoFile, fileName);
+  formData.append('fileName', fileName);
+  formData.append('type', 'raw_photo');
+
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token ?? SUPABASE_ANON_KEY;
+
+  const response = await fetch(`${SUPABASE_URL}/functions/v1/upload-to-drive`, {
+    method: 'POST',
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${token}`,
+    },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || `Upload failed with status ${response.status}`);
+  }
+
+  const data = await response.json();
+  if (!data.success) throw new Error(data.error || 'Google Drive raw photo upload failed');
+
+  return { fileId: data.fileId, fileUrl: data.fileUrl, downloadUrl: data.downloadUrl };
+}
+
 export async function uploadZipToGoogleDrive(
   zipBlob: Blob,
   fileName: string,

@@ -43,7 +43,7 @@ const CollectList = () => {
     const [selected, setSelected] = useState<number[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
-    const [itemsPerPage, setItemsPerPage] = useState(30);
+    const [itemsPerPage, setItemsPerPage] = useState(10);
     const [activeTab, setActiveTab] = useState<'to-collect' | 'collected'>('to-collect');
     const navigate = useNavigate();
 

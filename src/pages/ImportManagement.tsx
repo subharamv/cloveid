@@ -11,8 +11,9 @@ import { IDCardBack } from '../components/IDCardBack';
 import { imageToDataUrl } from '@/lib/utils';
 import cloveLogo from '@/assets/CLOVE LOGO BLACK.png';
 import backLogoSvg from '@/assets/logo svg.png';
+import { deleteDriveFile, extractDriveFileId } from '@/lib/googleDriveFiles';
 import {
-    Box, ChevronLeft, Search, Loader2, Trash2, Download, Send, Eye, Edit3, X,
+    Box, ChevronLeft, Search, Loader2, Trash2, Download, Send, Eye, Edit3, X, CheckCircle2,
 } from 'lucide-react';
 
 const ImportManagement = () => {
@@ -449,6 +450,10 @@ const ImportManagement = () => {
     const handleDeleteSelectedRows = () => {
         if (selectedRows.size === 0) { toast.error('No rows selected'); return; }
         if (!window.confirm(`Delete ${selectedRows.size} selected card(s)?`)) return;
+        selectedRows.forEach(idx => {
+            const fileId = extractDriveFileId(zipUrls[idx]);
+            if (fileId) deleteDriveFile(fileId).catch(err => console.warn('Drive delete failed:', err));
+        });
         const newDeletedIds: number[] = [];
         const newCsvData: any[][] = [];
         const newCardIds: Record<number, number> = {};
@@ -480,6 +485,13 @@ const ImportManagement = () => {
         if (!window.confirm('Delete this entire batch? This cannot be undone.')) return;
         setIsSaving(true);
         try {
+            const { data: batchCards } = await supabase.from('id_cards').select('zip_url').eq('batch_id', batchId);
+            if (batchCards) {
+                batchCards.forEach(c => {
+                    const fileId = extractDriveFileId(c.zip_url);
+                    if (fileId) deleteDriveFile(fileId).catch(err => console.warn('Drive delete failed:', err));
+                });
+            }
             const { error: cardsError } = await supabase.from('id_cards').delete().eq('batch_id', batchId);
             if (cardsError) throw cardsError;
             const { error: batchError } = await supabase.from('card_batches').delete().eq('batch_id', batchId);
@@ -495,6 +507,8 @@ const ImportManagement = () => {
 
     const handleDeleteRow = (index: number) => {
         if (!window.confirm('Delete this card?')) return;
+        const fileId = extractDriveFileId(zipUrls[index]);
+        if (fileId) deleteDriveFile(fileId).catch(err => console.warn('Drive delete failed:', err));
         const newDeletedIds: number[] = [];
         if (cardIds[index]) newDeletedIds.push(cardIds[index]);
         const newCsvData: any[][] = [];
@@ -579,6 +593,33 @@ const ImportManagement = () => {
         setCardViewEmployee(employee);
         setIsCardViewOpen(true);
         setIsCardFlipped(false);
+    };
+
+    const handlePrintCompleted = async () => {
+        if (selectedRows.size === 0) { toast.error('Please select at least one card.'); return; }
+        setIsDownloading(true);
+        try {
+            for (const rowIndex of selectedRows) {
+                const cardId = cardIds[rowIndex];
+                if (cardId) {
+                    await supabase.from('id_cards').update({ status: 'printed', print_status: 'printed' }).eq('id', cardId);
+                    setCardPrintStatuses(prev => ({ ...prev, [rowIndex]: 'printed' }));
+                }
+            }
+            if (batchId) {
+                const { data: remaining } = await supabase.from('id_cards').select('id').eq('batch_id', batchId)
+                    .not('print_status', 'in', '("printed","ready_to_collect","collected")');
+                if (!remaining || remaining.length === 0) {
+                    await supabase.from('card_batches').update({ status: 'completed' }).eq('batch_id', batchId);
+                }
+            }
+            toast.success(`${selectedRows.size} card(s) marked as printed`);
+            setSelectedRows(new Set());
+        } catch {
+            toast.error('Failed to mark as printed');
+        } finally {
+            setIsDownloading(false);
+        }
     };
 
     const confirmSendToPrint = async () => {
@@ -731,6 +772,15 @@ const ImportManagement = () => {
                         >
                             {isDownloading ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
                             {isDownloading ? 'Processing...' : `Send to Print (${selectedRows.size})`}
+                        </button>
+                        <button
+                            onClick={handlePrintCompleted}
+                            disabled={selectedRows.size === 0 || isDownloading}
+                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-green-500 text-white text-sm font-medium hover:bg-green-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                            title="Mark as printed without sending to vendor (offline/out-of-network)"
+                        >
+                            <CheckCircle2 size={14} />
+                            Print Completed
                         </button>
                         <button
                             onClick={handleSaveBatch}

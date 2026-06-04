@@ -23,6 +23,9 @@ import { imageToDataUrl, compressImage } from '@/lib/utils';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabaseClient';
 import AppHeader from '../components/AppHeader';
+import StepWizard from '@/components/StepWizard';
+import { uploadRawPhotoToDrive } from '@/lib/googleDriveUpload';
+import CardSaveProgress from '@/components/CardSaveProgress';
 
 const EditRequest: React.FC = () => {
     const { id } = useParams<{ id: string }>();
@@ -41,6 +44,8 @@ const EditRequest: React.FC = () => {
         countryCode: '+91',
         photo: null,
     });
+    const employeeRef = useRef(employee);
+    employeeRef.current = employee;
 
     const [showUploadNote, setShowUploadNote] = useState(true);
     const [modal, setModal] = useState({ isOpen: false, type: 'error' as 'error' | 'success', title: '', message: '' });
@@ -69,7 +74,10 @@ const EditRequest: React.FC = () => {
         shadow: 0,
     });
 
-    const [activeTab, setActiveTab] = useState<'details' | 'photo' | 'enhance'>('details');
+    const [wizardStep, setWizardStep] = useState(0);
+    const [saveProgress, setSaveProgress] = useState(0);
+    const [saveMessage, setSaveMessage] = useState('');
+    const [showSaveProgress, setShowSaveProgress] = useState(false);
 
     // track last object URL to revoke it later
     const lastObjectUrlRef = useRef<string | null>(null);
@@ -255,6 +263,8 @@ const EditRequest: React.FC = () => {
                         ty: 0,
                     }));
                     setEmployee(prev => ({ ...prev, photo: fileToUpload }));
+                    uploadRawPhotoToDrive(file, employeeRef.current.fullName, employeeRef.current.employeeId)
+                        .catch((err) => console.warn('Raw photo Drive backup failed:', err));
                     setPhotoUrl(img.src);
                     setIsLoadingImage(false);
                     resolve();
@@ -580,17 +590,22 @@ const EditRequest: React.FC = () => {
     const handleSave = async () => {
         if (!id) return;
 
-        try {
-            toast.info('Saving request...');
+        setShowSaveProgress(true);
+        setSaveProgress(5);
+        setSaveMessage('Preparing card...');
 
+        try {
+            setSaveProgress(10);
+            setSaveMessage('Processing photo...');
             const finalPhotoUrl = await processAndUploadImage();
 
             const frontCard = document.querySelector('.id-card-front-container') as HTMLElement;
             const backCard = document.querySelector('.id-card-back-container') as HTMLElement;
 
-            if (!frontCard || !backCard) {
-                throw new Error('Card elements not found');
-            }
+            if (!frontCard || !backCard) throw new Error('Card elements not found');
+
+            setSaveProgress(20);
+            setSaveMessage('Generating card images...');
 
             const zipBlob = await downloadZip(
                 employee,
@@ -603,18 +618,22 @@ const EditRequest: React.FC = () => {
                 filters
             );
 
+            setSaveProgress(45);
+            setSaveMessage('ZIP ready — uploading...');
+
             const zipFileName = `zips/${employee.fullName.replace(/ /g, '_')}_ID_Card.zip`;
             const { error: zipError } = await supabase.storage
                 .from('id-card-images')
                 .upload(zipFileName, zipBlob, { upsert: true });
 
-            if (zipError) {
-                throw zipError;
-            }
+            if (zipError) throw zipError;
 
             const { data: publicUrlData } = supabase.storage
                 .from('id-card-images')
                 .getPublicUrl(zipFileName);
+
+            setSaveProgress(80);
+            setSaveMessage('Saving request...');
 
             const zipUrl = publicUrlData.publicUrl;
 
@@ -636,13 +655,19 @@ const EditRequest: React.FC = () => {
             if (error) {
                 console.error('Error saving request:', error);
                 toast.error('Failed to save request.');
+                setShowSaveProgress(false);
+                setSaveProgress(0);
             } else {
+                setSaveProgress(100);
+                setSaveMessage('Saved successfully!');
                 toast.success('Request saved successfully!');
-                navigate('/manage-requests');
+                setTimeout(() => { setShowSaveProgress(false); setSaveProgress(0); navigate('/manage-requests'); }, 900);
             }
         } catch (error) {
             console.error('Error in handleSave:', error);
             toast.error(error instanceof Error ? error.message : 'An error occurred');
+            setShowSaveProgress(false);
+            setSaveProgress(0);
         }
     };
 
@@ -780,99 +805,151 @@ const EditRequest: React.FC = () => {
             {/* Header */}
             <AppHeader />
 
-            {/* Main Container */}
-            <div className="max-w-[1150px] mx-auto p-3 grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {/* Left Panel - Form + Upload */}
-                <div className="bg-white rounded-xl p-3.5 shadow-sm">
-                    <EmployeeForm employee={employee} onEmployeeChange={setEmployee} />
-
-                    <div className="mt-2.5">
-                        <PhotoUpload
-                            onPhotoSelect={handlePhotoSelect}
-                            currentPhoto={employee.photo}
-                            showUploadNote={showUploadNote}
-                            onHideUploadNote={handleHideUploadNote}
-                            onShowModal={handleShowModal}
-                            isLoadingImage={isLoadingImage}
-                        />
+            <main className="max-w-[1150px] mx-auto p-3 lg:p-6">
+                <button onClick={() => navigate(-1)} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-3 transition-colors">
+                    <span className="material-symbols-outlined text-lg">arrow_back</span>
+                    <span className="hidden md:inline">Back</span>
+                </button>
+                <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-6">
+                    {/* Left: Card Previews */}
+                    <div className="space-y-4">
+                        <div className="flex flex-col items-center gap-4 lg:flex-row lg:justify-center lg:gap-6">
+                            <div className="id-card-front-container w-[230px] h-[365px] bg-white shadow-sm rounded-lg overflow-hidden">
+                                <IDCardFront
+                                    employee={employee}
+                                    logoSrc={frontLogoDataUrl}
+                                    canvasRef={canvasRef}
+                                    photoBoxRef={photoBoxRef}
+                                    onPointerDown={handlePointerDown}
+                                    onPointerMove={handlePointerMove}
+                                    onPointerUp={handlePointerUp}
+                                    isLoadingImage={isLoadingImage}
+                                />
+                            </div>
+                            <div className="id-card-back-container w-[230px] h-[365px] bg-white shadow-sm rounded-lg overflow-hidden">
+                                <IDCardBack employee={employee} logoSrc={backLogoDataUrl} />
+                            </div>
+                        </div>
+                        <CardSaveProgress isVisible={showSaveProgress} progress={saveProgress} message={saveMessage} />
                     </div>
 
-                    {/* Photo Controls */}
-                    <div className="flex gap-2 flex-wrap mt-3">
-                        <button onClick={handleZoomIn} className="bg-white border border-input-border p-2 rounded-lg text-lg">＋</button>
-                        <button onClick={handleZoomOut} className="bg-white border border-input-border p-2 rounded-lg text-lg">−</button>
-                        <button onClick={handleRotateLeft} className="bg-white border border-input-border p-2 rounded-lg text-lg">⟲</button>
-                        <button onClick={handleRotateRight} className="bg-white border border-input-border p-2 rounded-lg text-lg">⟳</button>
-                        <button onClick={handleResetPos} className="bg-white border border-input-border p-2 rounded-lg text-sm">0</button>
+                    {/* Right: Step Wizard */}
+                    <div className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 overflow-hidden self-start">
+                        <StepWizard
+                            steps={[
+                                { label: 'Details', icon: 'badge' },
+                                { label: 'Photo', icon: 'photo_camera' },
+                                { label: 'Finalise', icon: 'tune' },
+                            ]}
+                            currentStep={wizardStep}
+                            onStepClick={setWizardStep}
+                        >
+                            {/* Step 0 — Employee Details */}
+                            <div className="space-y-5">
+                                <EmployeeForm employee={employee} onEmployeeChange={setEmployee} />
+                                <button type="button"
+                                    onClick={() => {
+                                        if (!employee.fullName.trim() || !employee.employeeId.trim()) {
+                                            toast.error('Please fill in Full Name and Employee ID to continue');
+                                            return;
+                                        }
+                                        setWizardStep(1);
+                                    }}
+                                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-r from-orange-400 to-orange-600 text-white text-sm font-semibold hover:opacity-90 transition-opacity">
+                                    Continue to Photo
+                                    <span className="material-symbols-outlined text-base">arrow_forward</span>
+                                </button>
+                            </div>
 
-                        <input
-                            type="range"
-                            min="0.5"
-                            max="3"
-                            step="0.01"
-                            value={editor.scale}
-                            onChange={(e) => setEditor(prev => ({ ...prev, scale: parseFloat(e.target.value) }))}
-                            className="w-[150px]"
-                        />
-                    </div>
+                            {/* Step 1 — Photo Upload */}
+                            <div className="space-y-3">
+                                <PhotoUpload
+                                    onPhotoSelect={handlePhotoSelect}
+                                    currentPhoto={employee.photo}
+                                    showUploadNote={showUploadNote}
+                                    onHideUploadNote={handleHideUploadNote}
+                                    onShowModal={handleShowModal}
+                                    isLoadingImage={isLoadingImage}
+                                />
+                                {editor.img && (
+                                    <div className="border-t border-gray-100 dark:border-gray-800 pt-3 space-y-2">
+                                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Position &amp; Zoom</p>
+                                        <div className="flex gap-1.5 flex-wrap">
+                                            <button onClick={handleZoomIn} disabled={!editor.img} className="flex-1 min-w-[36px] px-2 py-2 text-sm font-bold bg-primary hover:bg-primary/90 disabled:opacity-40 text-white rounded-lg transition-colors">＋</button>
+                                            <button onClick={handleZoomOut} disabled={!editor.img} className="flex-1 min-w-[36px] px-2 py-2 text-sm font-bold bg-primary hover:bg-primary/90 disabled:opacity-40 text-white rounded-lg transition-colors">−</button>
+                                            <button onClick={handleRotateLeft} disabled={!editor.img} className="flex-1 min-w-[36px] px-2 py-2 text-sm bg-primary hover:bg-primary/90 disabled:opacity-40 text-white rounded-lg transition-colors">⟲</button>
+                                            <button onClick={handleRotateRight} disabled={!editor.img} className="flex-1 min-w-[36px] px-2 py-2 text-sm bg-primary hover:bg-primary/90 disabled:opacity-40 text-white rounded-lg transition-colors">⟳</button>
+                                            <button onClick={handleResetPos} disabled={!editor.img} className="flex-1 min-w-[36px] px-2 py-2 text-xs bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 disabled:opacity-40 text-gray-800 dark:text-gray-200 rounded-lg transition-colors">Reset</button>
+                                        </div>
+                                        <input type="range" min="0.5" max="3" step="0.01" value={editor.scale}
+                                            onChange={(e) => setEditor(prev => ({ ...prev, scale: parseFloat(e.target.value) }))}
+                                            className="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full appearance-none cursor-pointer accent-primary" />
+                                        <div className="flex justify-between text-xs text-muted-foreground">
+                                            <span>Zoom: {editor.scale.toFixed(2)}x</span>
+                                            <span>Rotation: {Math.round((editor.rotation * 180) / Math.PI)}°</span>
+                                        </div>
+                                    </div>
+                                )}
+                                <div className="flex gap-2 pt-1">
+                                    <button type="button" onClick={() => setWizardStep(0)}
+                                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                                        <span className="material-symbols-outlined text-base">arrow_back</span>Back
+                                    </button>
+                                    <button type="button" onClick={() => setWizardStep(2)}
+                                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-gradient-to-r from-orange-400 to-orange-600 text-white text-sm font-semibold hover:opacity-90 transition-opacity">
+                                        Finalise<span className="material-symbols-outlined text-base">arrow_forward</span>
+                                    </button>
+                                </div>
+                            </div>
 
-                    {/* Image Adjustments */}
-                    <div className="mt-4 border-t border-gray-200 pt-3">
-                        <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Image Adjustments</p>
-                        <ImageAdjustments
-                            brightness={filters.brightness}
-                            contrast={filters.contrast}
-                            saturation={filters.saturation}
-                            shadow={filters.shadow}
-                            onBrightnessChange={(val) => setFilters(prev => ({ ...prev, brightness: val }))}
-                            onContrastChange={(val) => setFilters(prev => ({ ...prev, contrast: val }))}
-                            onSaturationChange={(val) => setFilters(prev => ({ ...prev, saturation: val }))}
-                            onShadowChange={(val) => setFilters(prev => ({ ...prev, shadow: val }))}
-                            onAutoEnhance={handleAutoEnhance}
-                            onResetFilters={handleResetFilters}
-                            hasImage={!!editor.img}
-                        />
-                    </div>
-
-                    {/* Action Buttons */}
-                    <div className="mt-3 flex gap-2 flex-wrap">
-                        <button onClick={handleSave} className="bg-blue-500 text-white px-4 py-2 rounded-md">Save</button>
-                        <button onClick={handleDownloadZip} className="bg-gray-500 text-white px-4 py-2 rounded-md">Download ZIP</button>
-                        <button onClick={handleApprove} className="bg-green-500 text-white px-4 py-2 rounded-md">Approve</button>
-                        <button onClick={handleReject} className="bg-red-500 text-white px-4 py-2 rounded-md">Reject</button>
-                        <button onClick={() => navigate(-1)} className="border border-red-200 dark:border-red-900/30 text-red-600 dark:text-red-400 px-4 py-2 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20">Cancel</button>
+                            {/* Step 2 — Enhance & Actions */}
+                            <div className="space-y-4">
+                                <ImageAdjustments
+                                    brightness={filters.brightness}
+                                    contrast={filters.contrast}
+                                    saturation={filters.saturation}
+                                    shadow={filters.shadow}
+                                    onBrightnessChange={(val) => setFilters(prev => ({ ...prev, brightness: val }))}
+                                    onContrastChange={(val) => setFilters(prev => ({ ...prev, contrast: val }))}
+                                    onSaturationChange={(val) => setFilters(prev => ({ ...prev, saturation: val }))}
+                                    onShadowChange={(val) => setFilters(prev => ({ ...prev, shadow: val }))}
+                                    onAutoEnhance={handleAutoEnhance}
+                                    onResetFilters={handleResetFilters}
+                                    hasImage={!!editor.img}
+                                />
+                                <div className="border-t border-gray-100 dark:border-gray-800 pt-4 space-y-2">
+                                    <button type="button" onClick={handleSave}
+                                        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-r from-orange-400 to-orange-600 text-white text-sm font-semibold hover:opacity-90 transition-opacity">
+                                        <span className="material-symbols-outlined text-base">save</span>Save Changes
+                                    </button>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <button type="button" onClick={handleApprove}
+                                            className="py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-semibold transition-colors flex items-center justify-center gap-1.5">
+                                            <span className="material-symbols-outlined text-base">check_circle</span>Approve
+                                        </button>
+                                        <button type="button" onClick={handleReject}
+                                            className="py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-semibold transition-colors flex items-center justify-center gap-1.5">
+                                            <span className="material-symbols-outlined text-base">cancel</span>Reject
+                                        </button>
+                                    </div>
+                                    <button type="button" onClick={handleDownloadZip}
+                                        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                                        <span className="material-symbols-outlined text-base">download</span>Download ZIP
+                                    </button>
+                                    <button type="button" onClick={() => navigate(-1)}
+                                        className="w-full py-2 rounded-xl border border-red-200 dark:border-red-900/30 text-xs font-medium text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
+                                        Cancel
+                                    </button>
+                                </div>
+                                <button type="button" onClick={() => setWizardStep(1)}
+                                    className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">
+                                    <span className="material-symbols-outlined text-sm">arrow_back</span>Back to Photo
+                                </button>
+                            </div>
+                        </StepWizard>
                     </div>
                 </div>
-
-                {/* Right Panel - Preview */}
-                <div className="bg-white rounded-xl p-3.5 shadow-sm">
-                    <div className="text-center mb-2">
-                        <strong className="text-primary">PREVIEW — FRONT</strong>
-                    </div>
-
-                    <div className="flex flex-col items-center gap-2">
-                        <div className="id-card-front-container w-[230px] h-[365px] bg-white shadow-sm rounded-lg overflow-hidden">
-                            <IDCardFront
-                                employee={employee}
-                                logoSrc={frontLogoDataUrl}
-                                canvasRef={canvasRef}
-                                photoBoxRef={photoBoxRef}
-                                onPointerDown={handlePointerDown}
-                                onPointerMove={handlePointerMove}
-                                onPointerUp={handlePointerUp}
-                                isLoadingImage={isLoadingImage}
-                            />
-                        </div>
-
-                        <div className="text-center mt-4 mb-2">
-                            <strong className="text-primary">PREVIEW — BACK</strong>
-                        </div>
-                        <div className="id-card-back-container w-[230px] h-[365px] bg-white shadow-sm rounded-lg overflow-hidden">
-                            <IDCardBack employee={employee} logoSrc={backLogoDataUrl} />
-                        </div>
-                    </div>
-                </div>
-            </div >
+            </main>
 
             <Modal
                 isOpen={modal.isOpen}

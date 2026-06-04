@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { listDriveFiles, searchDriveFiles, deleteDriveFile, DriveFolder, DriveFile } from '@/lib/googleDriveFiles';
 import JSZip from 'jszip';
+import { useStorageProvider } from '@/hooks/useStorageProvider';
 
 interface BreadcrumbEntry {
   id: string;
@@ -18,16 +19,15 @@ interface FolderContents {
   [folderId: string]: DriveFile[];
 }
 
-const ROOT_FOLDER_ID = '0AInOeJo8pGboUk9PVA';
-
 const DriveStorageManagement = () => {
   const { userRole } = useAuth();
+  const { driveFolderId: ROOT_FOLDER_ID } = useStorageProvider();
   const [folders, setFolders] = useState<DriveFolder[]>([]);
   const [files, setFiles] = useState<DriveFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [breadcrumb, setBreadcrumb] = useState<BreadcrumbEntry[]>([]);
-  const [currentFolderId, setCurrentFolderId] = useState<string>(ROOT_FOLDER_ID);
+  const [currentFolderId, setCurrentFolderId] = useState<string>('');
 
   // Global search state
   const [isGlobalSearch, setIsGlobalSearch] = useState(false);
@@ -50,6 +50,7 @@ const DriveStorageManagement = () => {
   const [confirmBatchDelete, setConfirmBatchDelete] = useState(false);
 
   const fetchContents = useCallback(async (folderId: string) => {
+    if (!folderId) return;
     setLoading(true);
     try {
       const result = await listDriveFiles(folderId === ROOT_FOLDER_ID ? undefined : folderId);
@@ -60,11 +61,14 @@ const DriveStorageManagement = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [ROOT_FOLDER_ID]);
 
+  // Seed currentFolderId and load root contents once ROOT_FOLDER_ID is known
   useEffect(() => {
+    if (!ROOT_FOLDER_ID) return;
+    setCurrentFolderId(prev => prev || ROOT_FOLDER_ID);
     fetchContents(ROOT_FOLDER_ID);
-  }, [fetchContents]);
+  }, [ROOT_FOLDER_ID, fetchContents]);
 
   // Debounced global search whenever query changes
   useEffect(() => {

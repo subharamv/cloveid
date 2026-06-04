@@ -3,7 +3,25 @@ import { corsHeaders } from '../_shared/cors.ts';
 const DRIVE_API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
-const ROOT_FOLDER_ID = '18t32txyxNQ2xeU8c5AOjX4WtiY7hT66b';
+const FALLBACK_FOLDER_ID = '0AInOeJo8pGboUk9PVA';
+
+async function getRootFolderId(): Promise<string> {
+  try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    if (!supabaseUrl || !serviceRoleKey) return FALLBACK_FOLDER_ID;
+
+    const res = await fetch(
+      `${supabaseUrl}/rest/v1/system_settings?key=eq.google_drive_folder_id&select=value`,
+      { headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` } },
+    );
+    const rows = await res.json();
+    const id = rows?.[0]?.value;
+    return id || FALLBACK_FOLDER_ID;
+  } catch {
+    return FALLBACK_FOLDER_ID;
+  }
+}
 
 function base64urlEncodeString(input: string): string {
   return btoa(unescape(encodeURIComponent(input)))
@@ -12,7 +30,6 @@ function base64urlEncodeString(input: string): string {
     .replace(/=/g, '');
 }
 
-// Use a loop instead of spread to avoid call-stack limits on large Uint8Arrays
 function base64urlEncodeBytes(bytes: Uint8Array): string {
   let binary = '';
   for (let i = 0; i < bytes.length; i++) {
@@ -34,7 +51,6 @@ async function getAccessToken(serviceAccount: Record<string, string>): Promise<s
 
   const signingInput = `${header}.${payload}`;
 
-  // Handle both "\n" escape sequences and actual newlines in the PEM key
   const pemKey = serviceAccount.private_key.replace(/\\n/g, '\n');
   const pemContents = pemKey
     .replace(/-----BEGIN PRIVATE KEY-----/g, '')
@@ -59,7 +75,6 @@ async function getAccessToken(serviceAccount: Record<string, string>): Promise<s
 
   const jwt = `${signingInput}.${base64urlEncodeBytes(new Uint8Array(signatureBuffer))}`;
 
-  // Use URLSearchParams so the body is correctly application/x-www-form-urlencoded
   const tokenBody = new URLSearchParams();
   tokenBody.set('grant_type', 'urn:ietf:params:oauth:grant-type:jwt-bearer');
   tokenBody.set('assertion', jwt);
@@ -77,6 +92,7 @@ async function getAccessToken(serviceAccount: Record<string, string>): Promise<s
   return data.access_token;
 }
 
+// Finds an existing folder or creates it — always uses supportsAllDrives so it works in Shared Drives
 async function findOrCreateFolder(
   name: string,
   parentId: string,
@@ -84,8 +100,9 @@ async function findOrCreateFolder(
 ): Promise<string> {
   const query =
     `name='${name.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and '${parentId}' in parents and trashed=false`;
+
   const searchRes = await fetch(
-    `${DRIVE_API}/files?q=${encodeURIComponent(query)}&fields=files(id,name)`,
+    `${DRIVE_API}/files?q=${encodeURIComponent(query)}&fields=files(id,name)&supportsAllDrives=true&includeItemsFromAllDrives=true`,
     { headers: { Authorization: `Bearer ${accessToken}` } },
   );
   const searchData = await searchRes.json();
@@ -94,7 +111,8 @@ async function findOrCreateFolder(
     return searchData.files[0].id;
   }
 
-  const createRes = await fetch(`${DRIVE_API}/files`, {
+  // Folder does not exist yet — create it inside the parent (Shared Drive)
+  const createRes = await fetch(`${DRIVE_API}/files?supportsAllDrives=true`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -126,11 +144,15 @@ async function uploadFile(
   form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
   form.append('file', fileBlob);
 
-  const uploadRes = await fetch(`${UPLOAD_API}/files?uploadType=multipart&fields=id`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${accessToken}` },
-    body: form,
-  });
+  // supportsAllDrives=true is required for uploads into Shared Drive folders
+  const uploadRes = await fetch(
+    `${UPLOAD_API}/files?uploadType=multipart&fields=id&supportsAllDrives=true`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}` },
+      body: form,
+    },
+  );
 
   const uploadData = await uploadRes.json();
   if (!uploadData.id) {
@@ -140,7 +162,7 @@ async function uploadFile(
 }
 
 async function makePublic(fileId: string, accessToken: string): Promise<void> {
-  await fetch(`${DRIVE_API}/files/${fileId}/permissions`, {
+  await fetch(`${DRIVE_API}/files/${fileId}/permissions?supportsAllDrives=true`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -170,22 +192,28 @@ Deno.serve(async (req) => {
     if (!file || !fileName) throw new Error('Missing file or fileName');
 
     const accessToken = await getAccessToken(serviceAccount);
-
-    const now = new Date();
-    const monthFolder = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const monthFolderId = await findOrCreateFolder(monthFolder, ROOT_FOLDER_ID, accessToken);
+    const rootFolderId = await getRootFolderId();
 
     let targetFolderId: string;
-    if (uploadType === 'processed_photo') {
+
+    if (uploadType === 'raw_photo') {
+      targetFolderId = await findOrCreateFolder('Photos', rootFolderId, accessToken);
+    } else if (uploadType === 'processed_photo') {
       const employeeId = formData.get('employeeId') as string;
       if (!employeeId) throw new Error('Missing employeeId for processed_photo type');
-      const processedFolderId = await findOrCreateFolder('Processed Photos', ROOT_FOLDER_ID, accessToken);
+      const processedFolderId = await findOrCreateFolder('Processed Photos', rootFolderId, accessToken);
       targetFolderId = await findOrCreateFolder(employeeId, processedFolderId, accessToken);
-    } else if (uploadType === 'batch' && batchName) {
-      const batchesFolderId = await findOrCreateFolder('Batches', monthFolderId, accessToken);
-      targetFolderId = await findOrCreateFolder(batchName, batchesFolderId, accessToken);
     } else {
-      targetFolderId = await findOrCreateFolder('Single Cards', monthFolderId, accessToken);
+      const now = new Date();
+      const monthFolder = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      const monthFolderId = await findOrCreateFolder(monthFolder, rootFolderId, accessToken);
+
+      if (uploadType === 'batch' && batchName) {
+        const batchesFolderId = await findOrCreateFolder('Batches', monthFolderId, accessToken);
+        targetFolderId = await findOrCreateFolder(batchName, batchesFolderId, accessToken);
+      } else {
+        targetFolderId = await findOrCreateFolder('Single Cards', monthFolderId, accessToken);
+      }
     }
 
     const fileId = await uploadFile(fileName, file, targetFolderId, accessToken);

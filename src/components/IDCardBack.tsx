@@ -24,7 +24,7 @@ export const IDCardBack = React.forwardRef<HTMLDivElement, IDCardBackProps>(({ e
   return (
     <div ref={ref} className="id-card-back card-container relative w-[230px] h-[365px]">
       {/* Logo */}
-      <div className="absolute top-3 left-1/2 -translate-x-1/2 w-[120px]">
+      <div className="absolute top-[17px] left-1/2 -translate-x-1/2 w-[120px]">
         <img
           src={logoSrc}
           alt="Clove Technologies"

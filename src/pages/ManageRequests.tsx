@@ -4,6 +4,7 @@ import logo from '../assets/CLOVE LOGO BLACK.png';
 import ViewRequestModal from '../components/ViewRequestModal';
 import { useBranches } from '../hooks/useBranches';
 import { supabase } from '@/lib/supabaseClient';
+import { deleteDriveFile, extractDriveFileId } from '@/lib/googleDriveFiles';
 import { HiddenCardRenderer } from '../components/HiddenCardRenderer';
 import { useDownloadZip } from '../hooks/useDownloadZip';
 import { imageToDataUrl } from '@/lib/utils';
@@ -472,11 +473,40 @@ const ManageRequests = () => {
         setProcessingRequest(null);
     };
 
+    const handlePrintCompleted = async () => {
+        if (selectedRequests.length === 0) { toast.error('Please select at least one request.'); return; }
+        setIsDownloading(true);
+        try {
+            for (const reqId of selectedRequests) {
+                const request = requests.find(r => r.id === reqId);
+                if (!request) continue;
+                const table = request.sourceTable === 'card_details' ? 'card_details' : 'requests';
+                await supabase.from(table).update({ status: 'Printed', print_status: 'printed' }).eq('id', reqId);
+            }
+            setRequests(prev => prev.map(req =>
+                selectedRequests.includes(req.id) ? { ...req, status: 'Printed', print_status: 'printed' } : req
+            ));
+            toast.success(`${selectedRequests.length} card(s) marked as printed`);
+            setSelectedRequests([]);
+        } catch {
+            toast.error('Failed to mark as printed');
+        } finally {
+            setIsDownloading(false);
+        }
+    };
+
     const handleDeleteSelected = async () => {
         if (selectedRequests.length === 0) { toast.error('No requests selected to delete.'); return; }
 
         const requestIds = selectedRequests.filter(id => { const req = requests.find(r => r.id === id); return req && req.sourceTable !== 'card_details'; });
         const cardDetailsIds = selectedRequests.filter(id => { const req = requests.find(r => r.id === id); return req && req.sourceTable === 'card_details'; });
+
+        // Fire Drive deletions in background before removing from DB
+        selectedRequests.forEach(id => {
+            const req = requests.find(r => r.id === id);
+            const fileId = extractDriveFileId(req?.zip_url);
+            if (fileId) deleteDriveFile(fileId).catch(err => console.warn('Drive delete failed:', err));
+        });
 
         let hasError = false;
         if (requestIds.length > 0) {
@@ -733,6 +763,15 @@ const ManageRequests = () => {
                                 >
                                     <Send size={15} />
                                     Send to Print
+                                </button>
+                                <button
+                                    onClick={handlePrintCompleted}
+                                    disabled={selectedRequests.length === 0 || isDownloading}
+                                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-green-500 text-white rounded-xl text-sm font-medium disabled:bg-gray-300 dark:disabled:bg-gray-600 disabled:text-gray-500 hover:bg-green-600 transition-colors"
+                                    title="Mark as printed without sending to vendor (offline/out-of-network)"
+                                >
+                                    <CheckCircle2 size={15} />
+                                    Print Completed
                                 </button>
                             </div>
                         </div>

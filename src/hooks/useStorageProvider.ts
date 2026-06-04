@@ -4,25 +4,50 @@ import { uploadZipToGoogleDrive } from '@/lib/googleDriveUpload';
 
 export type StorageProvider = 'supabase' | 'google_drive';
 
-const SETTING_KEY = 'storage_provider';
+const FALLBACK_FOLDER_ID = '0AInOeJo8pGboUk9PVA';
+
+/** Extract a Drive folder ID from either a full URL or a bare ID string. */
+export function extractDriveFolderId(input: string): string | null {
+  const trimmed = input.trim();
+  const match = trimmed.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  if (match) return match[1];
+  if (/^[a-zA-Z0-9_-]+$/.test(trimmed)) return trimmed;
+  return null;
+}
 
 export const useStorageProvider = () => {
   const [provider, setProvider] = useState<StorageProvider>('supabase');
   const [loading, setLoading] = useState(true);
+  const [driveFolderId, setDriveFolderId] = useState<string>(FALLBACK_FOLDER_ID);
+  const [driveFolderUrl, setDriveFolderUrl] = useState<string>(
+    `https://drive.google.com/drive/folders/${FALLBACK_FOLDER_ID}`,
+  );
 
   useEffect(() => {
-    fetchProvider();
+    fetchSettings();
   }, []);
 
-  const fetchProvider = async () => {
+  const fetchSettings = async () => {
     try {
       const { data } = await supabase
         .from('system_settings')
-        .select('value')
-        .eq('key', SETTING_KEY)
-        .maybeSingle();
+        .select('key, value')
+        .in('key', ['storage_provider', 'google_drive_folder_id', 'google_drive_folder_url']);
 
-      setProvider(data?.value === 'google_drive' ? 'google_drive' : 'supabase');
+      const map: Record<string, string> = {};
+      (data ?? []).forEach((row: { key: string; value: string }) => {
+        map[row.key] = row.value;
+      });
+
+      setProvider(map['storage_provider'] === 'google_drive' ? 'google_drive' : 'supabase');
+
+      if (map['google_drive_folder_id']) {
+        setDriveFolderId(map['google_drive_folder_id']);
+        setDriveFolderUrl(
+          map['google_drive_folder_url'] ||
+            `https://drive.google.com/drive/folders/${map['google_drive_folder_id']}`,
+        );
+      }
     } catch {
       setProvider('supabase');
     } finally {
@@ -33,16 +58,31 @@ export const useStorageProvider = () => {
   const updateProvider = async (newProvider: StorageProvider) => {
     const { error } = await supabase
       .from('system_settings')
-      .upsert({ key: SETTING_KEY, value: newProvider, updated_at: new Date().toISOString() });
+      .upsert({ key: 'storage_provider', value: newProvider, updated_at: new Date().toISOString() });
 
     if (!error) setProvider(newProvider);
     return { error };
   };
 
-  /**
-   * Upload a ZIP blob to the active storage provider.
-   * Returns the public URL of the stored file.
-   */
+  /** Save a new Google Drive folder URL/ID to system_settings. */
+  const updateDriveFolder = async (urlOrId: string): Promise<{ error: any }> => {
+    const folderId = extractDriveFolderId(urlOrId);
+    if (!folderId) return { error: new Error('Invalid Google Drive folder URL or ID') };
+
+    const folderUrl = `https://drive.google.com/drive/folders/${folderId}`;
+
+    const { error } = await supabase.from('system_settings').upsert([
+      { key: 'google_drive_folder_id', value: folderId, updated_at: new Date().toISOString() },
+      { key: 'google_drive_folder_url', value: folderUrl, updated_at: new Date().toISOString() },
+    ]);
+
+    if (!error) {
+      setDriveFolderId(folderId);
+      setDriveFolderUrl(folderUrl);
+    }
+    return { error };
+  };
+
   const uploadZip = async (
     zipBlob: Blob,
     fileName: string,
@@ -54,7 +94,6 @@ export const useStorageProvider = () => {
       return result.downloadUrl;
     }
 
-    // Supabase Storage path
     const path = `zips/${fileName}`;
     const { error } = await supabase.storage
       .from('id-card-images')
@@ -69,5 +108,14 @@ export const useStorageProvider = () => {
     return publicUrlData.publicUrl;
   };
 
-  return { provider, loading, updateProvider, refreshProvider: fetchProvider, uploadZip };
+  return {
+    provider,
+    loading,
+    driveFolderId,
+    driveFolderUrl,
+    updateProvider,
+    updateDriveFolder,
+    refreshProvider: fetchSettings,
+    uploadZip,
+  };
 };

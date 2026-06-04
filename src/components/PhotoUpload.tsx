@@ -1,4 +1,6 @@
 import React, { useRef, useState } from 'react';
+import { Info } from 'lucide-react';
+import PhotoGuideModal from '@/components/PhotoGuideModal';
 
 interface EditorState {
     img: HTMLImageElement | null;
@@ -11,8 +13,8 @@ interface EditorState {
 interface PhotoUploadProps {
     onPhotoSelect: (file: File) => void;
     currentPhoto?: File | null;
-    showUploadNote: boolean;
-    onHideUploadNote: () => void;
+    showUploadNote?: boolean;
+    onHideUploadNote?: () => void;
     onShowModal?: (type: 'error' | 'success', title: string, message: string) => void;
     editor?: EditorState;
     onZoomIn?: () => void;
@@ -42,6 +44,7 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
 }) => {
     const [isDragging, setIsDragging] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
+    const [showGuide, setShowGuide] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const validateFile = (file: File): string | null => {
@@ -66,7 +69,7 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
             const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2);
 
             await onPhotoSelect(file);
-            onHideUploadNote();
+            onHideUploadNote?.();
             onShowModal?.('success', 'File accepted', `File (${fileSizeMB}MB) accepted and ready for processing.`);
         } catch (err) {
             const errorMsg = err instanceof Error ? err.message : String(err);
@@ -133,9 +136,20 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
     return (
         <div className="space-y-3">
             {!editor?.img && (
-                <label className="block text-muted-foreground text-sm">
-                    Photo (upload)
-                </label>
+                <div className="flex items-center justify-between">
+                    <label className="block text-muted-foreground text-sm">
+                        Photo (upload)
+                    </label>
+                    <button
+                        type="button"
+                        onClick={() => setShowGuide(true)}
+                        className="flex items-center gap-1 text-xs text-orange-500 hover:text-orange-600 transition-colors"
+                        title="Photo guidelines"
+                    >
+                        <Info size={14} />
+                        <span>Guidelines</span>
+                    </button>
+                </div>
             )}
 
             <div
@@ -188,11 +202,6 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
                 )}
             </div>
 
-            {showUploadNote && !busy && !editor?.img && (
-                <div className="text-xs text-muted-foreground">
-                    Supported: JPEG / PNG. Max file size: {MAX_FILE_SIZE_MB} MB. Drag & drop or paste supported.
-                </div>
-            )}
 
             {editor?.img && (
                 <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
@@ -248,6 +257,7 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
                     </p>
                 </div>
             )}
+            <PhotoGuideModal isOpen={showGuide} onClose={() => setShowGuide(false)} />
         </div>
     );
 };

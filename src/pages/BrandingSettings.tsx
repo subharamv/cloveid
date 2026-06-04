@@ -19,8 +19,10 @@ const BrandingSettings = () => {
     const { branding, loading: brandingLoading, refreshBranding } = useBranding();
     const { branches, loading: branchesLoading, refreshBranches } = useBranches();
     const { departments, loading: departmentsLoading, refreshDepartments } = useDepartments();
-    const { provider: storageProvider, loading: storageLoading, updateProvider: updateStorageProvider } = useStorageProvider();
+    const { provider: storageProvider, loading: storageLoading, updateProvider: updateStorageProvider, driveFolderId, driveFolderUrl, updateDriveFolder } = useStorageProvider();
     const [savingStorage, setSavingStorage] = useState(false);
+    const [folderUrlInput, setFolderUrlInput] = useState('');
+    const [savingFolder, setSavingFolder] = useState(false);
     const [activeTab, setActiveTab] = useState<Tab>('branding');
     const [uploading, setUploading] = useState<string | null>(null);
     const [saving, setSaving] = useState<string | null>(null);
@@ -546,46 +548,79 @@ const BrandingSettings = () => {
                             )}
                         </div>
 
-                        {/* Google Drive Info (only when Drive is active) */}
-                        {storageProvider === 'google_drive' && (
-                            <div className="bg-white dark:bg-gray-800/80 rounded-2xl border border-gray-200 dark:border-gray-700 p-6 mb-6">
-                                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">Google Drive Configuration</h3>
-                                <div className="space-y-3 text-sm">
-                                    <div className="flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-900/50 rounded-xl">
-                                        <FolderOpen size={16} className="text-orange-500 mt-0.5 shrink-0" />
-                                        <div>
-                                            <p className="font-medium text-gray-700 dark:text-gray-300">Folder structure</p>
-                                            <p className="text-gray-500 dark:text-gray-400 mt-0.5">Root → <span className="font-mono text-xs bg-gray-200 dark:bg-gray-700 px-1 rounded">YYYY-MM</span> → <span className="font-mono text-xs bg-gray-200 dark:bg-gray-700 px-1 rounded">Batches / Single Cards</span></p>
-                                        </div>
+                        {/* Google Drive Configuration (always visible, required before switching) */}
+                        <div className="bg-white dark:bg-gray-800/80 rounded-2xl border border-gray-200 dark:border-gray-700 p-6 mb-6">
+                            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Google Drive Folder</h3>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">Paste a Google Drive shared folder URL to set where uploads are stored. The service account must have edit access to that folder.</p>
+
+                            {/* Current connected folder */}
+                            {driveFolderId && (
+                                <div className="flex items-center gap-2 p-3 mb-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl">
+                                    <CheckCircle2 size={15} className="text-green-500 shrink-0" />
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-xs font-medium text-green-700 dark:text-green-400">Connected folder</p>
+                                        <p className="text-xs text-green-600 dark:text-green-500 font-mono truncate mt-0.5">{driveFolderId}</p>
                                     </div>
-                                    <div className="flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-900/50 rounded-xl">
-                                        <CloudUpload size={16} className="text-orange-500 mt-0.5 shrink-0" />
-                                        <div>
-                                            <p className="font-medium text-gray-700 dark:text-gray-300">Service account</p>
-                                            <p className="text-gray-500 dark:text-gray-400 mt-0.5 font-mono text-xs break-all">drive-storage-service@clove-id.iam.gserviceaccount.com</p>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-3">
-                                        <button
-                                            onClick={() => navigate('/settings/drive-storage')}
-                                            className="flex items-center gap-2 px-4 py-2.5 bg-orange-500 text-white rounded-xl text-sm font-medium hover:bg-orange-600 transition-colors shadow-sm"
-                                        >
-                                            <HardDrive size={15} />
-                                            Browse Files
-                                        </button>
-                                        <a
-                                            href="https://drive.google.com/drive/folders/0AInOeJo8pGboUk9PVA"
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-                                        >
-                                            <ExternalLink size={15} />
-                                            Open in Drive
-                                        </a>
+                                    <a href={driveFolderUrl} target="_blank" rel="noopener noreferrer"
+                                        className="shrink-0 text-green-600 dark:text-green-400 hover:text-green-700 transition-colors">
+                                        <ExternalLink size={14} />
+                                    </a>
+                                </div>
+                            )}
+
+                            {/* Editable input */}
+                            <div className="flex gap-2">
+                                <input
+                                    type="text"
+                                    value={folderUrlInput}
+                                    onChange={e => setFolderUrlInput(e.target.value)}
+                                    placeholder="https://drive.google.com/drive/folders/..."
+                                    className="flex-1 px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-orange-400"
+                                />
+                                <button
+                                    disabled={!folderUrlInput.trim() || savingFolder}
+                                    onClick={async () => {
+                                        setSavingFolder(true);
+                                        const { error } = await updateDriveFolder(folderUrlInput.trim());
+                                        setSavingFolder(false);
+                                        if (error) toast.error(error.message || 'Failed to save folder');
+                                        else { toast.success('Drive folder updated'); setFolderUrlInput(''); }
+                                    }}
+                                    className="flex items-center gap-1.5 px-4 py-2 bg-orange-500 text-white rounded-xl text-sm font-medium hover:bg-orange-600 disabled:opacity-40 transition-colors shrink-0"
+                                >
+                                    {savingFolder ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                                    Connect
+                                </button>
+                            </div>
+
+                            {/* Folder structure info + browse */}
+                            <div className="mt-4 space-y-3 text-sm">
+                                <div className="flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-900/50 rounded-xl">
+                                    <FolderOpen size={16} className="text-orange-500 mt-0.5 shrink-0" />
+                                    <div>
+                                        <p className="font-medium text-gray-700 dark:text-gray-300">Folder structure</p>
+                                        <p className="text-gray-500 dark:text-gray-400 mt-0.5">Root → <span className="font-mono text-xs bg-gray-200 dark:bg-gray-700 px-1 rounded">YYYY-MM</span> → <span className="font-mono text-xs bg-gray-200 dark:bg-gray-700 px-1 rounded">Batches / Single Cards</span></p>
+                                        <p className="text-gray-500 dark:text-gray-400 mt-0.5">Root → <span className="font-mono text-xs bg-gray-200 dark:bg-gray-700 px-1 rounded">Photos</span> (raw photo backups)</p>
                                     </div>
                                 </div>
+                                <div className="flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-900/50 rounded-xl">
+                                    <CloudUpload size={16} className="text-orange-500 mt-0.5 shrink-0" />
+                                    <div>
+                                        <p className="font-medium text-gray-700 dark:text-gray-300">Service account</p>
+                                        <p className="text-gray-500 dark:text-gray-400 mt-0.5 font-mono text-xs break-all">drive-storage-service@clove-id.iam.gserviceaccount.com</p>
+                                    </div>
+                                </div>
+                                {storageProvider === 'google_drive' && (
+                                    <button
+                                        onClick={() => navigate('/settings/drive-storage')}
+                                        className="flex items-center gap-2 px-4 py-2.5 bg-orange-500 text-white rounded-xl text-sm font-medium hover:bg-orange-600 transition-colors shadow-sm"
+                                    >
+                                        <HardDrive size={15} />
+                                        Browse Drive Files
+                                    </button>
+                                )}
                             </div>
-                        )}
+                        </div>
 
                         {/* Browse Supabase Storage */}
                         {storageProvider === 'supabase' && (

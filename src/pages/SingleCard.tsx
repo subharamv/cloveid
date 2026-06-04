@@ -22,11 +22,14 @@ import { auto } from "@cloudinary/url-gen/qualifiers/quality";
 import { auto as autoFormat } from "@cloudinary/url-gen/qualifiers/format";
 import { imageToDataUrl, compressImage } from '@/lib/utils';
 import { supabase } from '@/lib/supabaseClient';
+import { uploadRawPhotoToDrive } from '@/lib/googleDriveUpload';
 
 import AppHeader from '../components/AppHeader';
 import { useAuth } from '@/hooks/useAuth';
 import { ProgressBar } from '@/components/ProgressBar';
 import { useStorageProvider } from '@/hooks/useStorageProvider';
+import StepWizard from '@/components/StepWizard';
+import CardSaveProgress from '@/components/CardSaveProgress';
 
 const SingleCard: React.FC = () => {
     const { userRole } = useAuth();
@@ -48,6 +51,8 @@ const SingleCard: React.FC = () => {
         countryCode: '+91',
         photo: null,
     });
+    const employeeRef = useRef(employee);
+    employeeRef.current = employee;
 
     const batchState = location.state as {
         sourceTable?: string;
@@ -136,6 +141,7 @@ const SingleCard: React.FC = () => {
         }
     };
 
+    const [rawPhotoFile, setRawPhotoFile] = useState<File | null>(null);
     const [showUploadNote, setShowUploadNote] = useState(true);
     const [modal, setModal] = useState({ isOpen: false, type: 'error' as 'error' | 'success', title: '', message: '' });
     const [isLoadingImage, setIsLoadingImage] = useState(false);
@@ -166,7 +172,10 @@ const SingleCard: React.FC = () => {
         shadow: 0,
     });
 
-    const [activeTab, setActiveTab] = useState<'details' | 'photo' | 'enhance'>('details');
+    const [wizardStep, setWizardStep] = useState(0);
+    const [saveProgress, setSaveProgress] = useState(0);
+    const [saveMessage, setSaveMessage] = useState('');
+    const [showSaveProgress, setShowSaveProgress] = useState(false);
 
     // track last object URL to revoke it later
     const lastObjectUrlRef = useRef<string | null>(null);
@@ -201,6 +210,7 @@ const SingleCard: React.FC = () => {
 
 
     const handlePhotoSelect = useCallback(async (file: File) => {
+        setRawPhotoFile(file);
         try {
             setIsLoadingImage(true);
             setShowImageProcessProgress(true);
@@ -339,6 +349,8 @@ const SingleCard: React.FC = () => {
                         ty: 0,
                     }));
                     setEmployee(prev => ({ ...prev, photo: fileToUpload, photo_url: img.src }));
+                    uploadRawPhotoToDrive(file, employeeRef.current.fullName, employeeRef.current.employeeId)
+                        .catch((err) => console.warn('Raw photo Drive backup failed:', err));
                     setIsLoadingImage(false);
                     setTimeout(() => setShowImageProcessProgress(false), 500);
                     resolve();
@@ -663,6 +675,7 @@ const SingleCard: React.FC = () => {
     }, [editor.img, editor.rotation, editor.scale, editor.tx, editor.ty, filters, TARGET_W_PX, TARGET_H_PX, frontLogoDataUrl, backLogoDataUrl]);
 
     const handleReset = useCallback(() => {
+        setRawPhotoFile(null);
         setEmployee({
             fullName: '',
             employeeId: '',
@@ -764,15 +777,20 @@ const SingleCard: React.FC = () => {
             return;
         }
 
-        try {
-            toast.info('Saving card details...');
+        setShowSaveProgress(true);
+        setSaveProgress(5);
+        setSaveMessage('Preparing card...');
 
+        try {
             const frontCard = document.querySelector('.id-card-front-container') as HTMLElement;
             const backCard = document.querySelector('.id-card-back-container') as HTMLElement;
 
             if (!frontCard || !backCard) {
                 throw new Error('Card elements not found');
             }
+
+            setSaveProgress(10);
+            setSaveMessage('Generating card images...');
 
             // Generate ZIP file
             const zipBlob = await downloadZip(
@@ -792,9 +810,15 @@ const SingleCard: React.FC = () => {
                 filters
             );
 
+            setSaveProgress(45);
+            setSaveMessage('ZIP ready — uploading...');
+
             // Upload ZIP to active storage provider (Supabase or Google Drive)
             const zipFileName = `${employee.fullName.replace(/ /g, '_')}_${employee.employeeId}_ID_Card.zip`;
             const zipUrl = await uploadZip(zipBlob, zipFileName, batchState?.sourceTable === 'id_cards' ? 'batch' : 'single');
+
+            setSaveProgress(80);
+            setSaveMessage('Saving card details...');
 
             // Handle batch context (from ImportManagement)
             if (batchState?.sourceTable === 'id_cards') {
@@ -921,13 +945,19 @@ const SingleCard: React.FC = () => {
             if (dbError) {
                 console.error('Error saving to database:', dbError);
                 toast.error('Failed to save card details.');
+                setShowSaveProgress(false);
             } else {
+                setSaveProgress(100);
+                setSaveMessage('Saved successfully!');
                 toast.success('Card details saved successfully!');
+                setTimeout(() => { setShowSaveProgress(false); setSaveProgress(0); }, 1800);
                 handleReset();
             }
         } catch (error) {
             console.error('Error in handleSave:', error);
             toast.error(error instanceof Error ? error.message : 'An error occurred while saving');
+            setShowSaveProgress(false);
+            setSaveProgress(0);
         }
     };
 
@@ -969,79 +999,93 @@ const SingleCard: React.FC = () => {
                                 <IDCardBack employee={employee} logoSrc={backLogoDataUrl} />
                             </div>
                         </div>
+                        <CardSaveProgress isVisible={showSaveProgress} progress={saveProgress} message={saveMessage} />
                     </div>
 
-                    {/* Right: Tabbed Controls Panel */}
-                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden self-start">
-                        {/* Tab Bar */}
-                        <div className="flex border-b border-gray-200">
-                            {([
-                                { key: 'details', icon: 'badge', label: 'Details' },
-                                { key: 'photo', icon: 'photo_camera', label: 'Photo' },
-                                { key: 'enhance', icon: 'tune', label: 'Enhance' },
-                            ] as const).map(tab => (
-                                <button
-                                    key={tab.key}
-                                    onClick={() => setActiveTab(tab.key)}
-                                    className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-3 text-xs sm:text-sm font-medium transition-colors border-b-2 ${
-                                        activeTab === tab.key
-                                            ? 'border-primary text-primary'
-                                            : 'border-transparent text-muted-foreground hover:text-foreground'
-                                    }`}
-                                >
-                                    <span className="material-symbols-outlined text-lg">{tab.icon}</span>
-                                    {tab.label}
-                                </button>
-                            ))}
-                        </div>
-
-                        {/* Tab Content */}
-                        <div className="p-4">
-                            {activeTab === 'details' && (
+                    {/* Right: Step Wizard */}
+                    <div className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 overflow-hidden self-start">
+                        <StepWizard
+                            steps={[
+                                { label: 'Details', icon: 'badge' },
+                                { label: 'Photo', icon: 'photo_camera' },
+                                { label: 'Finalise', icon: 'tune' },
+                            ]}
+                            currentStep={wizardStep}
+                            onStepClick={setWizardStep}
+                        >
+                            {/* Step 0 — Employee Details */}
+                            <div className="space-y-5">
                                 <EmployeeForm employee={employee} onEmployeeChange={setEmployee} />
-                            )}
-                            {activeTab === 'photo' && (
-                                <div className="space-y-3">
-                                    <PhotoUpload
-                                        onPhotoSelect={handlePhotoSelect}
-                                        currentPhoto={employee.photo}
-                                        showUploadNote={showUploadNote}
-                                        onHideUploadNote={handleHideUploadNote}
-                                        onShowModal={handleShowModal}
-                                        isLoadingImage={isLoadingImage}
-                                    />
-                                    {editor.img && (
-                                        <>
-                                            <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
-                                                <p className="text-sm font-medium text-muted-foreground mb-2">Position & Zoom</p>
-                                                <div className="flex gap-2 flex-wrap">
-                                                    <button onClick={handleZoomIn} disabled={!editor.img} className="flex-1 min-w-[40px] px-2 py-2 text-sm font-medium bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded transition-colors">＋</button>
-                                                    <button onClick={handleZoomOut} disabled={!editor.img} className="flex-1 min-w-[40px] px-2 py-2 text-sm font-medium bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded transition-colors">−</button>
-                                                    <button onClick={handleRotateLeft} disabled={!editor.img} className="flex-1 min-w-[40px] px-2 py-2 text-sm font-medium bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded transition-colors">⟲</button>
-                                                    <button onClick={handleRotateRight} disabled={!editor.img} className="flex-1 min-w-[40px] px-2 py-2 text-sm font-medium bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded transition-colors">⟳</button>
-                                                    <button onClick={handleResetPos} disabled={!editor.img} className="flex-1 min-w-[40px] px-2 py-2 text-sm font-medium bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed text-gray-800 dark:text-gray-200 rounded transition-colors">Reset</button>
-                                                </div>
-                                                <div className="mt-2">
-                                                    <input
-                                                        type="range"
-                                                        min="0.5"
-                                                        max="3"
-                                                        step="0.01"
-                                                        value={editor.scale}
-                                                        onChange={(e) => setEditor(prev => ({ ...prev, scale: parseFloat(e.target.value) }))}
-                                                        className="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full appearance-none cursor-pointer accent-primary [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-sm"
-                                                    />
-                                                    <div className="flex justify-between text-xs text-muted-foreground mt-0.5">
-                                                        <span>Zoom: {editor.scale.toFixed(2)}x</span>
-                                                        <span>Rotation: {Math.round((editor.rotation * 180) / Math.PI)}°</span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </>
-                                    )}
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        if (!employee.fullName.trim() || !employee.employeeId.trim()) {
+                                            toast.error('Please fill in Full Name and Employee ID to continue');
+                                            return;
+                                        }
+                                        setWizardStep(1);
+                                    }}
+                                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-r from-orange-400 to-orange-600 text-white text-sm font-semibold hover:opacity-90 transition-opacity"
+                                >
+                                    Continue to Photo
+                                    <span className="material-symbols-outlined text-base">arrow_forward</span>
+                                </button>
+                            </div>
+
+                            {/* Step 1 — Photo Upload */}
+                            <div className="space-y-3">
+                                <PhotoUpload
+                                    onPhotoSelect={handlePhotoSelect}
+                                    currentPhoto={employee.photo}
+                                    showUploadNote={showUploadNote}
+                                    onHideUploadNote={handleHideUploadNote}
+                                    onShowModal={handleShowModal}
+                                    isLoadingImage={isLoadingImage}
+                                />
+                                {editor.img && (
+                                    <div className="border-t border-gray-100 dark:border-gray-800 pt-3 space-y-2">
+                                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Position &amp; Zoom</p>
+                                        <div className="flex gap-1.5 flex-wrap">
+                                            <button onClick={handleZoomIn} disabled={!editor.img} className="flex-1 min-w-[36px] px-2 py-2 text-sm font-bold bg-primary hover:bg-primary/90 disabled:opacity-40 text-white rounded-lg transition-colors">＋</button>
+                                            <button onClick={handleZoomOut} disabled={!editor.img} className="flex-1 min-w-[36px] px-2 py-2 text-sm font-bold bg-primary hover:bg-primary/90 disabled:opacity-40 text-white rounded-lg transition-colors">−</button>
+                                            <button onClick={handleRotateLeft} disabled={!editor.img} className="flex-1 min-w-[36px] px-2 py-2 text-sm bg-primary hover:bg-primary/90 disabled:opacity-40 text-white rounded-lg transition-colors">⟲</button>
+                                            <button onClick={handleRotateRight} disabled={!editor.img} className="flex-1 min-w-[36px] px-2 py-2 text-sm bg-primary hover:bg-primary/90 disabled:opacity-40 text-white rounded-lg transition-colors">⟳</button>
+                                            <button onClick={handleResetPos} disabled={!editor.img} className="flex-1 min-w-[36px] px-2 py-2 text-xs bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 disabled:opacity-40 text-gray-800 dark:text-gray-200 rounded-lg transition-colors">Reset</button>
+                                        </div>
+                                        <input
+                                            type="range" min="0.5" max="3" step="0.01"
+                                            value={editor.scale}
+                                            onChange={(e) => setEditor(prev => ({ ...prev, scale: parseFloat(e.target.value) }))}
+                                            className="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full appearance-none cursor-pointer accent-primary"
+                                        />
+                                        <div className="flex justify-between text-xs text-muted-foreground">
+                                            <span>Zoom: {editor.scale.toFixed(2)}x</span>
+                                            <span>Rotation: {Math.round((editor.rotation * 180) / Math.PI)}°</span>
+                                        </div>
+                                    </div>
+                                )}
+                                <div className="flex gap-2 pt-1">
+                                    <button
+                                        type="button"
+                                        onClick={() => setWizardStep(0)}
+                                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                                    >
+                                        <span className="material-symbols-outlined text-base">arrow_back</span>
+                                        Back
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setWizardStep(2)}
+                                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-gradient-to-r from-orange-400 to-orange-600 text-white text-sm font-semibold hover:opacity-90 transition-opacity"
+                                    >
+                                        Finalise
+                                        <span className="material-symbols-outlined text-base">arrow_forward</span>
+                                    </button>
                                 </div>
-                            )}
-                            {activeTab === 'enhance' && (
+                            </div>
+
+                            {/* Step 2 — Enhance & Export */}
+                            <div className="space-y-4">
                                 <ImageAdjustments
                                     brightness={filters.brightness}
                                     contrast={filters.contrast}
@@ -1055,98 +1099,77 @@ const SingleCard: React.FC = () => {
                                     onResetFilters={handleResetFilters}
                                     hasImage={!!editor.img}
                                 />
-                            )}
-                        </div>
-
-                        {/* Action Buttons */}
-                        <div className="p-4 border-t border-gray-200">
-                            <ActionButtons
-                                employee={employee}
-                                isPhotoUploaded={!!editor.img}
-                                onSave={handleSave}
-                                onCancel={() => navigate(-1)}
-                                onDownloadPNG={async () => {
-                                    toast.info('Generating PNG files...');
-
-                                    const frontCard = document.querySelector('.id-card-front-container') as HTMLElement;
-                                    const backCard = document.querySelector('.id-card-back-container') as HTMLElement;
-
-                                    if (!frontCard || !backCard) {
-                                        toast.error('Error generating PNG files: Card elements not found.');
-                                        return;
-                                    }
-
-                                    try {
-                                        const [frontCanvas, backCanvas] = await Promise.all([
-                                            generateCardCanvas(frontCard, true),
-                                            generateCardCanvas(backCard, false),
-                                        ]);
-
-                                        const downloadCanvasAsPNG = (canvas: HTMLCanvasElement, fileName: string) => {
-                                            canvas.toBlob((blob) => {
-                                                if (blob) {
-                                                    const url = URL.createObjectURL(blob);
-                                                    const a = document.createElement('a');
-                                                    a.href = url;
-                                                    a.download = fileName;
-                                                    a.click();
-                                                    URL.revokeObjectURL(url);
-                                                }
-                                            }, 'image/png', 1.0);
-                                        };
-
-                                        downloadCanvasAsPNG(frontCanvas, `${employee.fullName || 'id'}_front.png`);
-                                        downloadCanvasAsPNG(backCanvas, `${employee.fullName || 'id'}_back.png`);
-
-                                        toast.success('PNG files downloaded successfully!');
-                                    } catch (error) {
-                                        console.error('Error generating PNG files:', error);
-                                        toast.error('Error generating PNG files. Please try again.');
-                                    }
-                                }}
-                                onDownloadPDF={async () => {
-                                    toast.info('Generating PDF document...');
-
-                                    const frontCard = document.querySelector('.id-card-front-container') as HTMLElement;
-                                    const backCard = document.querySelector('.id-card-back-container') as HTMLElement;
-
-                                    if (!frontCard || !backCard) {
-                                        toast.error('Error generating PDF: Card elements not found.');
-                                        return;
-                                    }
-
-                                    try {
-                                        const [frontCanvas, backCanvas] = await Promise.all([
-                                            generateCardCanvas(frontCard, true),
-                                            generateCardCanvas(backCard, false),
-                                        ]);
-
-                                        const { jsPDF } = await import('jspdf');
-                                        const pdf = new jsPDF({
-                                            orientation: 'portrait',
-                                            unit: 'cm',
-                                            format: [5.3, 8.5]
-                                        });
-
-                                        const frontImgData = frontCanvas.toDataURL('image/png', 1.0);
-                                        const backImgData = backCanvas.toDataURL('image/png', 1.0);
-
-                                        pdf.addImage(frontImgData, 'PNG', 0, 0, 5.3, 8.5);
-                                        pdf.addPage();
-                                        pdf.addImage(backImgData, 'PNG', 0, 0, 5.3, 8.5);
-
-                                        pdf.save(`${employee.fullName || 'id'}_cards.pdf`);
-                                        toast.success('PDF downloaded successfully!');
-                                    } catch (error) {
-                                        console.error('Error generating PDF:', error);
-                                        toast.error('Error generating PDF. Please try again.');
-                                    }
-                                }}
-                                onDownloadZip={handleDownloadZip}
-                                onPrint={onPrint}
-                                onReset={handleReset}
-                            />
-                        </div>
+                                <div className="border-t border-gray-100 dark:border-gray-800 pt-4 space-y-2">
+                                    <button
+                                        type="button"
+                                        onClick={handleSave}
+                                        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-r from-orange-400 to-orange-600 text-white text-sm font-semibold hover:opacity-90 transition-opacity"
+                                    >
+                                        <span className="material-symbols-outlined text-base">save</span>
+                                        Save Details
+                                    </button>
+                                    <div className="grid grid-cols-3 gap-2">
+                                        {[
+                                            { label: 'PNG', action: async () => {
+                                                toast.info('Generating PNG files...');
+                                                const f = document.querySelector('.id-card-front-container') as HTMLElement;
+                                                const b = document.querySelector('.id-card-back-container') as HTMLElement;
+                                                if (!f || !b) { toast.error('Card elements not found.'); return; }
+                                                try {
+                                                    const [fc, bc] = await Promise.all([generateCardCanvas(f, true), generateCardCanvas(b, false)]);
+                                                    const dl = (c: HTMLCanvasElement, n: string) => c.toBlob((bl) => { if (bl) { const u = URL.createObjectURL(bl); const a = document.createElement('a'); a.href=u; a.download=n; a.click(); URL.revokeObjectURL(u); }}, 'image/png', 1.0);
+                                                    dl(fc, `${employee.fullName||'id'}_front.png`);
+                                                    dl(bc, `${employee.fullName||'id'}_back.png`);
+                                                    toast.success('PNG downloaded!');
+                                                } catch { toast.error('PNG generation failed.'); }
+                                            }},
+                                            { label: 'PDF', action: async () => {
+                                                toast.info('Generating PDF...');
+                                                const f = document.querySelector('.id-card-front-container') as HTMLElement;
+                                                const b = document.querySelector('.id-card-back-container') as HTMLElement;
+                                                if (!f || !b) { toast.error('Card elements not found.'); return; }
+                                                try {
+                                                    const [fc, bc] = await Promise.all([generateCardCanvas(f, true), generateCardCanvas(b, false)]);
+                                                    const { jsPDF } = await import('jspdf');
+                                                    const pdf = new jsPDF({ orientation: 'portrait', unit: 'cm', format: [5.3, 8.5] });
+                                                    pdf.addImage(fc.toDataURL('image/png',1.0),'PNG',0,0,5.3,8.5); pdf.addPage(); pdf.addImage(bc.toDataURL('image/png',1.0),'PNG',0,0,5.3,8.5);
+                                                    pdf.save(`${employee.fullName||'id'}_cards.pdf`);
+                                                    toast.success('PDF downloaded!');
+                                                } catch { toast.error('PDF generation failed.'); }
+                                            }},
+                                            { label: 'ZIP', action: handleDownloadZip },
+                                        ].map(({ label, action }) => (
+                                            <button key={label} type="button" onClick={action}
+                                                className="py-2 rounded-xl border border-gray-200 dark:border-gray-700 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                                                {label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <button type="button" onClick={onPrint}
+                                            className="py-2 rounded-xl border border-gray-200 dark:border-gray-700 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center justify-center gap-1.5">
+                                            <span className="material-symbols-outlined text-sm">print</span>Print
+                                        </button>
+                                        <button type="button" onClick={handleReset}
+                                            className="py-2 rounded-xl border border-gray-200 dark:border-gray-700 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center justify-center gap-1.5">
+                                            <span className="material-symbols-outlined text-sm">refresh</span>Reset
+                                        </button>
+                                    </div>
+                                    <button type="button" onClick={() => navigate(-1)}
+                                        className="w-full py-2 rounded-xl border border-red-200 dark:border-red-900/30 text-xs font-medium text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
+                                        Cancel
+                                    </button>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setWizardStep(1)}
+                                    className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                                >
+                                    <span className="material-symbols-outlined text-sm">arrow_back</span>
+                                    Back to Photo
+                                </button>
+                            </div>
+                        </StepWizard>
                     </div>
                 </div>
             </main>

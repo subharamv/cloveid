@@ -15,6 +15,7 @@ import {
 import { IDCardFront } from '@/components/IDCardFront';
 import { IDCardBack } from '@/components/IDCardBack';
 import { Employee } from '@/types/employee';
+import { deleteDriveFile, extractDriveFileId } from '@/lib/googleDriveFiles';
 
 
 interface DashboardStats {
@@ -248,6 +249,9 @@ const Dashboard = () => {
     const handleDeleteCard = async (id: number) => {
         if (!confirm('Are you sure you want to delete this card?')) return;
         try {
+            const { data: card } = await supabase.from('card_details').select('zip_url').eq('id', id).maybeSingle();
+            const fileId = extractDriveFileId(card?.zip_url);
+            if (fileId) deleteDriveFile(fileId).catch(err => console.warn('Drive delete failed:', err));
             const { error } = await supabase.from('card_details').delete().eq('id', id);
             if (error) throw error;
             toast.success('Card deleted successfully');
