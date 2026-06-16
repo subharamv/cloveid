@@ -1,7 +1,7 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Employee, PhotoTransform } from '@/types/employee';
+import { Employee, PhotoTransform, getRequiredFieldsToastMessage } from '@/types/employee';
 import { EmployeeForm } from '@/components/EmployeeForm';
 import { PhotoUpload } from '@/components/PhotoUpload';
 import { ImageAdjustments } from '@/components/ImageAdjustments';
@@ -28,6 +28,33 @@ import { ProgressBar } from '@/components/ProgressBar';
 import StepWizard from '@/components/StepWizard';
 import { uploadRawPhotoToDrive } from '@/lib/googleDriveUpload';
 import CardSaveProgress from '@/components/CardSaveProgress';
+import { BLOOD_GROUPS } from '@/types/employee';
+
+const HEADER_KEY_VARIANTS: Record<keyof Employee, string[]> = {
+    employeeId: ['employee id', 'id', 'employeeid', 'emp id'],
+    fullName: ['full name', 'name', 'employee name'],
+    bloodGroup: ['blood group', 'bloodgroup', 'blood grp'],
+    branch: ['branch', 'location'],
+    emergencyContact: ['emergency contact', 'emergency no', 'emergency number', 'emergency contact no'],
+    countryCode: [],
+    photo: [],
+} as Record<keyof Employee, string[]>;
+
+const matchEmployeeKey = (header: string): keyof Employee | null => {
+    const key = String(header || '').trim().toLowerCase();
+    for (const employeeKey of Object.keys(HEADER_KEY_VARIANTS) as (keyof Employee)[]) {
+        if (HEADER_KEY_VARIANTS[employeeKey].includes(key)) return employeeKey;
+    }
+    return null;
+};
+
+const normalizeBloodGroup = (raw: string): string => {
+    if (!raw) return '';
+    const cleaned = String(raw).trim().toUpperCase().replace(/\s+/g, '');
+    const match = cleaned.match(/^(AB|A|B|O)\s*([+-])\s*(VE)?$/);
+    if (!match) return BLOOD_GROUPS.includes(cleaned as any) ? cleaned : String(raw).trim();
+    return `${match[1]}${match[2]}`;
+};
 
 const BulkCardEditor: React.FC = () => {
     const location = useLocation();
@@ -278,22 +305,15 @@ const BulkCardEditor: React.FC = () => {
         };
 
         if (rowData && headers) {
-            const headerMapping: { [key: string]: keyof Employee } = {
-                'employee id': 'employeeId',
-                'full name': 'fullName',
-                'blood group': 'bloodGroup',
-                'branch': 'branch',
-                'emergency contact': 'emergencyContact',
-                'emergency no': 'emergencyContact',
-            };
-
             const newEmployee: Partial<Employee> = {};
             let imageUrl: string | undefined;
 
             headers.forEach((header: string, index: number) => {
                 const key = String(header || '').trim().toLowerCase();
-                const employeeKey = headerMapping[key];
-                if (employeeKey) {
+                const employeeKey = matchEmployeeKey(header);
+                if (employeeKey === 'bloodGroup') {
+                    newEmployee.bloodGroup = normalizeBloodGroup(rowData[index]);
+                } else if (employeeKey) {
                     newEmployee[employeeKey] = rowData[index] as never;
                 }
                 if (key === 'photo' || key === 'image' || key === 'photo (upload)') {
@@ -755,8 +775,9 @@ const BulkCardEditor: React.FC = () => {
     }, []);
 
     const handleSaveAndBack = async () => {
-        if (!employee.fullName || !employee.employeeId) {
-            toast.error('Please fill in at least Full Name and Employee ID');
+        const missingFieldsMessage = getRequiredFieldsToastMessage(employee);
+        if (missingFieldsMessage) {
+            toast.error(missingFieldsMessage);
             return;
         }
 
@@ -793,18 +814,6 @@ const BulkCardEditor: React.FC = () => {
             setSaveProgress(80);
             setSaveMessage('Saving card details...');
             if (cardId) {
-                const headerMapping: { [key: string]: keyof Employee } = {
-                    'full name': 'fullName',
-                    'employee id': 'employeeId',
-                    'blood group': 'bloodGroup',
-                    'branch': 'branch',
-                    'emergency contact': 'emergencyContact',
-                    'emergency no': 'emergencyContact',
-                    'photo': 'photo',
-                    'image': 'photo',
-                    'photo (upload)': 'photo',
-                };
-
                 const newCardData = {
                     ...rowData.reduce((acc: any, val: any, idx: number) => {
                         acc[headers[idx]] = val;
@@ -814,9 +823,11 @@ const BulkCardEditor: React.FC = () => {
 
                 headers.forEach((header: string, idx: number) => {
                     const key = String(header || '').trim().toLowerCase();
-                    const employeeKey = headerMapping[key];
+                    const employeeKey = (key === 'photo' || key === 'image' || key === 'photo (upload)')
+                        ? 'photo'
+                        : matchEmployeeKey(header);
                     if (employeeKey) {
-                        newCardData[header] = updatedEmployee[employeeKey];
+                        newCardData[header] = updatedEmployee[employeeKey as keyof Employee];
                     }
                 });
 
@@ -902,8 +913,9 @@ const BulkCardEditor: React.FC = () => {
     };
 
     const handleDownload = async () => {
-        if (!employee.fullName || !employee.employeeId) {
-            toast.error('Please fill in at least Full Name and Employee ID');
+        const missingFieldsMessage = getRequiredFieldsToastMessage(employee);
+        if (missingFieldsMessage) {
+            toast.error(missingFieldsMessage);
             return;
         }
 
@@ -994,8 +1006,9 @@ const BulkCardEditor: React.FC = () => {
                                 <button
                                     type="button"
                                     onClick={() => {
-                                        if (!employee.fullName.trim() || !employee.employeeId.trim()) {
-                                            toast.error('Please fill in Full Name and Employee ID to continue');
+                                        const missingFieldsMessage = getRequiredFieldsToastMessage(employee);
+                                        if (missingFieldsMessage) {
+                                            toast.error(missingFieldsMessage);
                                             return;
                                         }
                                         setWizardStep(1);

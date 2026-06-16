@@ -1,6 +1,6 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Employee } from '@/types/employee';
+import { Employee, getRequiredFieldsToastMessage } from '@/types/employee';
 import { EmployeeForm } from '@/components/EmployeeForm';
 import { PhotoUpload } from '@/components/PhotoUpload';
 import { ImageAdjustments } from '@/components/ImageAdjustments';
@@ -849,8 +849,9 @@ const EditRequest: React.FC = () => {
                                 <EmployeeForm employee={employee} onEmployeeChange={setEmployee} />
                                 <button type="button"
                                     onClick={() => {
-                                        if (!employee.fullName.trim() || !employee.employeeId.trim()) {
-                                            toast.error('Please fill in Full Name and Employee ID to continue');
+                                        const missingFieldsMessage = getRequiredFieldsToastMessage(employee);
+                                        if (missingFieldsMessage) {
+                                            toast.error(missingFieldsMessage);
                                             return;
                                         }
                                         setWizardStep(1);

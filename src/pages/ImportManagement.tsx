@@ -13,7 +13,7 @@ import cloveLogo from '@/assets/CLOVE LOGO BLACK.png';
 import backLogoSvg from '@/assets/logo svg.png';
 import { deleteDriveFile, extractDriveFileId } from '@/lib/googleDriveFiles';
 import {
-    Box, ChevronLeft, Search, Loader2, Trash2, Download, Send, Eye, Edit3, X, CheckCircle2,
+    Box, ChevronLeft, Search, Loader2, Trash2, Download, Send, Eye, Edit3, X, CheckCircle2, Columns3,
 } from 'lucide-react';
 
 const ImportManagement = () => {
@@ -42,6 +42,7 @@ const ImportManagement = () => {
     const [cardViewEmployee, setCardViewEmployee] = useState<any>(null);
     const [isCardViewOpen, setIsCardViewOpen] = useState(false);
     const [isCardFlipped, setIsCardFlipped] = useState(false);
+    const [isColumnModalOpen, setIsColumnModalOpen] = useState(false);
 
     useEffect(() => {
         const loadLogos = async () => {
@@ -538,6 +539,14 @@ const ImportManagement = () => {
         toast.success('Row deleted');
     };
 
+    const handleRemoveColumn = (columnIndex: number) => {
+        const columnName = headers[columnIndex];
+        if (!window.confirm(`Remove column "${columnName}" from all ${csvData.length} card(s)?`)) return;
+        setHeaders(prev => prev.filter((_, idx) => idx !== columnIndex));
+        setCsvData(prev => prev.map(row => row.filter((_, idx) => idx !== columnIndex)));
+        toast.success(`Removed column "${columnName}". Click "Save Batch" to persist this change.`);
+    };
+
     const handleMarkAsDone = async (rowIndex: number) => {
         const cardId = cardIds[rowIndex];
         if (!cardId) { toast.error('Card ID not found'); return; }
@@ -783,6 +792,13 @@ const ImportManagement = () => {
                             Print Completed
                         </button>
                         <button
+                            onClick={() => setIsColumnModalOpen(true)}
+                            disabled={headers.length === 0}
+                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        >
+                            <Columns3 size={14} /> Manage Columns
+                        </button>
+                        <button
                             onClick={handleSaveBatch}
                             disabled={isSaving || csvData.length === 0}
                             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-orange-500 text-white text-sm font-medium hover:bg-orange-600 disabled:opacity-50 transition-colors"
@@ -792,6 +808,39 @@ const ImportManagement = () => {
                         </button>
                     </div>
                 </div>
+
+                {isColumnModalOpen && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setIsColumnModalOpen(false)}>
+                        <div
+                            className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl w-full max-w-md max-h-[80vh] overflow-y-auto"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+                                <h2 className="text-base font-semibold text-gray-900 dark:text-white">Manage Columns</h2>
+                                <button onClick={() => setIsColumnModalOpen(false)} className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-lg">
+                                    <X size={18} />
+                                </button>
+                            </div>
+                            <div className="p-5 space-y-2">
+                                <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                                    Removing a column deletes it from every card in this batch. Click "Save Batch" afterwards to persist the change.
+                                </p>
+                                {headers.map((header, idx) => (
+                                    <div key={`${header}-${idx}`} className="flex items-center justify-between px-3 py-2 rounded-xl border border-gray-100 dark:border-gray-700">
+                                        <span className="text-sm text-gray-700 dark:text-gray-300 truncate">{header}</span>
+                                        <button
+                                            onClick={() => handleRemoveColumn(idx)}
+                                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                            title={`Remove ${header}`}
+                                        >
+                                            <Trash2 size={14} />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* Table Card */}
                 <div className="bg-white dark:bg-gray-800/80 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
@@ -839,6 +888,7 @@ const ImportManagement = () => {
                                             className="rounded border-gray-300 dark:border-gray-600"
                                         />
                                     </th>
+                                    <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Sl. No</th>
                                     {headers.map(header => {
                                         if (header.toLowerCase() === 'photo_url') return null;
                                         const display = (header.toLowerCase() === 'photo' || header.toLowerCase() === 'photo (upload)') ? 'Photo' : header;
@@ -855,12 +905,12 @@ const ImportManagement = () => {
                             <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
                                 {filteredData.length === 0 ? (
                                     <tr>
-                                        <td colSpan={headers.length + 3} className="px-5 py-12 text-center text-sm text-gray-400">
+                                        <td colSpan={headers.length + 4} className="px-5 py-12 text-center text-sm text-gray-400">
                                             {searchQuery ? 'No cards match your search.' : 'No cards in this batch.'}
                                         </td>
                                     </tr>
                                 ) : (
-                                    filteredData.map(({ row, index: i }) => (
+                                    filteredData.map(({ row, index: i }, displayIdx) => (
                                         <tr key={i} className={`transition-colors ${selectedRows.has(i) ? 'bg-orange-50 dark:bg-orange-900/10' : 'hover:bg-gray-50 dark:hover:bg-gray-900/20'}`}>
                                             <td className="px-5 py-4">
                                                 <input
@@ -870,6 +920,7 @@ const ImportManagement = () => {
                                                     className="rounded border-gray-300 dark:border-gray-600"
                                                 />
                                             </td>
+                                            <td className="px-5 py-4 text-sm text-gray-500 dark:text-gray-400">{displayIdx + 1}</td>
                                             {row.map((cell, j) => {
                                                 if (headers[j]?.toLowerCase() === 'photo_url') return null;
                                                 if (j === photoColumnIndex) {

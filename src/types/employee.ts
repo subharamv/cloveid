@@ -62,3 +62,21 @@ export const COUNTRY_CODES = [
   { code: '+1', flag: '🇺🇸', label: '+1' },
   { code: '+44', flag: '🇬🇧', label: '+44' },
 ];
+
+const REQUIRED_EMPLOYEE_FIELDS: { key: keyof Employee; label: string }[] = [
+  { key: 'fullName', label: 'Full Name' },
+  { key: 'employeeId', label: 'Employee ID' },
+  { key: 'branch', label: 'Branch' },
+];
+
+export function getMissingEmployeeFields(employee: Employee): string[] {
+  return REQUIRED_EMPLOYEE_FIELDS
+    .filter(({ key }) => !String(employee[key] ?? '').trim())
+    .map(({ label }) => label);
+}
+
+export function getRequiredFieldsToastMessage(employee: Employee): string | null {
+  const missing = getMissingEmployeeFields(employee);
+  if (missing.length === 0) return null;
+  return `Please fill in: ${missing.join(', ')}`;
+}

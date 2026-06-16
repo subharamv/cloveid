@@ -1,6 +1,6 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Employee } from '@/types/employee';
+import { Employee, getRequiredFieldsToastMessage } from '@/types/employee';
 import { EmployeeForm } from '@/components/EmployeeForm';
 import { IDCardFront } from '@/components/IDCardFront';
 import { IDCardBack } from '@/components/IDCardBack';
@@ -382,8 +382,9 @@ const EmployeePage: React.FC = () => {
 
     // Reset everything (revoke object URL)
     const handleDownloadZip = useCallback(async () => {
-        if (!employee.fullName || !employee.employeeId) {
-            toast.error('Please fill in employee name and ID before downloading.');
+        const missingFieldsMessage = getRequiredFieldsToastMessage(employee);
+        if (missingFieldsMessage) {
+            toast.error(missingFieldsMessage);
             return;
         }
 
@@ -513,8 +514,13 @@ const EmployeePage: React.FC = () => {
     }, []);
 
     const handleSubmitRequest = async () => {
-        if (!employee.fullName || !employee.employeeId || !photoUrl) {
-            toast.error('Please fill in all details and upload a photo.');
+        const missingFieldsMessage = getRequiredFieldsToastMessage(employee);
+        if (missingFieldsMessage) {
+            toast.error(missingFieldsMessage);
+            return;
+        }
+        if (!photoUrl) {
+            toast.error('Please upload a photo');
             return;
         }
 

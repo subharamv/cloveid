@@ -2,7 +2,7 @@ import React from 'react';
 import { Download, FileText, RefreshCcw, Printer, Image, Archive, FileType, Save, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Employee } from '@/types/employee';
+import { Employee, getMissingEmployeeFields, getRequiredFieldsToastMessage } from '@/types/employee';
 import { toast } from 'sonner';
 import {
   DropdownMenu,
@@ -37,8 +37,9 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
   setIsSidebarOpen
 }) => {
   const handleDownload = (type: 'png' | 'pdf' | 'zip') => {
-    if (!employee.fullName || !employee.employeeId) {
-      toast.error('Please fill in employee name and ID before downloading.');
+    const missingFieldsMessage = getRequiredFieldsToastMessage(employee);
+    if (missingFieldsMessage) {
+      toast.error(missingFieldsMessage);
       return;
     }
 
@@ -78,7 +79,7 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
           <DropdownMenuTrigger asChild>
             <Button
               className="bg-primary hover:bg-primary/90 text-white w-full"
-              disabled={!isPhotoUploaded || !employee.fullName || !employee.employeeId}
+              disabled={!isPhotoUploaded || getMissingEmployeeFields(employee).length > 0}
             >
               <Download className="w-4 h-4 mr-2" />
               Download
@@ -103,7 +104,7 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
         <Button
           onClick={onSave}
           className="bg-green-600 hover:bg-green-700 text-white w-full"
-          disabled={!employee.fullName || !employee.employeeId}
+          disabled={getMissingEmployeeFields(employee).length > 0}
         >
           <Save className="w-4 h-4 mr-2" />
           Save Details

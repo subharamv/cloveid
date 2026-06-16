@@ -1,7 +1,7 @@
 // src/pages/index.tsx
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Employee, PhotoTransform } from '@/types/employee';
+import { Employee, PhotoTransform, getRequiredFieldsToastMessage } from '@/types/employee';
 import { EmployeeForm } from '@/components/EmployeeForm';
 import { PhotoUpload } from '@/components/PhotoUpload';
 import { ImageAdjustments } from '@/components/ImageAdjustments';
@@ -564,8 +564,9 @@ const SingleCard: React.FC = () => {
 
     // Reset everything (revoke object URL)
     const handleDownloadZip = useCallback(async () => {
-        if (!employee.fullName || !employee.employeeId) {
-            toast.error('Please fill in employee name and ID before downloading.');
+        const missingFieldsMessage = getRequiredFieldsToastMessage(employee);
+        if (missingFieldsMessage) {
+            toast.error(missingFieldsMessage);
             return;
         }
 
@@ -772,8 +773,9 @@ const SingleCard: React.FC = () => {
     };
 
     const handleSave = async () => {
-        if (!employee.fullName || !employee.employeeId) {
-            toast.error('Please fill in at least Full Name and Employee ID');
+        const missingFieldsMessage = getRequiredFieldsToastMessage(employee);
+        if (missingFieldsMessage) {
+            toast.error(missingFieldsMessage);
             return;
         }
 
@@ -1019,8 +1021,9 @@ const SingleCard: React.FC = () => {
                                 <button
                                     type="button"
                                     onClick={() => {
-                                        if (!employee.fullName.trim() || !employee.employeeId.trim()) {
-                                            toast.error('Please fill in Full Name and Employee ID to continue');
+                                        const missingFieldsMessage = getRequiredFieldsToastMessage(employee);
+                                        if (missingFieldsMessage) {
+                                            toast.error(missingFieldsMessage);
                                             return;
                                         }
                                         setWizardStep(1);
