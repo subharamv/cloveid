@@ -13,7 +13,7 @@ export const IDCardBack = React.forwardRef<HTMLDivElement, IDCardBackProps>(({ e
   const { branding } = useBranding();
   const { branches } = useBranches();
   
-  const branchInfo = branches.find(b => b.name === employee.branch);
+  const branchInfo = branches.find(b => b.name.toLowerCase() === (employee.branch || '').toLowerCase());
 
   const emergencyContactDisplay = employee.countryCode && employee.emergencyContact
     ? `${employee.countryCode} ${employee.emergencyContact}`
@@ -60,13 +60,9 @@ export const IDCardBack = React.forwardRef<HTMLDivElement, IDCardBackProps>(({ e
         <div className="text-[8.8px]">IF FOUND PLEASE RETURN TO :</div>
         <div className="font-bold text-[9.8px]">Clove Technologies Pvt. Ltd.</div>
         
-        {branchInfo ? (
-          <div className="text-[8.8px] leading-tight whitespace-pre-line">
-            {branchInfo.address}
-          </div>
-        ) : (
-          <div className="text-[8.8px]">Address not configured for {employee.branch}</div>
-        )}
+        <div className="text-[8.8px] leading-tight whitespace-pre-line">
+          {branchInfo?.address || branding.contact_address || ''}
+        </div>
 
         <div className="border-t border-dashed border-gray-200 my-1.5"></div>
 

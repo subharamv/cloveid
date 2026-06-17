@@ -229,19 +229,12 @@ const ImportManagement = () => {
     };
 
     const handleDownload = async (rowData: string[], rowIndex: number) => {
-        const fullNameIndex = headers.indexOf('Full Name');
+        const lc = headers.map(h => String(h || '').toLowerCase().trim());
+        const fullNameIndex = lc.findIndex(h => h === 'full name' || h === 'name');
         const employeeName = fullNameIndex !== -1 ? rowData[fullNameIndex] : 'employee';
         const zipUrl = zipUrls[rowIndex];
-        const cardId = cardIds[rowIndex];
         if (!zipUrl) { toast.error('ZIP file not available. Please edit and save the employee first.'); return; }
         try {
-            if (cardId) {
-                await supabase.from('id_cards').update({ print_status: 'printed', updated_at: new Date().toISOString() }).eq('id', cardId);
-                await supabase.from('vendor_requests').update({ status: 'completed', created_at: new Date().toISOString() }).eq('id_card_id', cardId);
-                const { data: updatedCard } = await supabase.from('id_cards').select('print_status').eq('id', cardId).single();
-                if (updatedCard) setCardPrintStatuses(prev => ({ ...prev, [rowIndex]: updatedCard.print_status || 'printed' }));
-                if (batchId) await checkAndUpdateBatchStatus(batchId);
-            }
             const link = document.createElement('a');
             link.href = zipUrl;
             link.download = `${employeeName.replace(/ /g, '_')}_ID_Card.zip`;
@@ -359,25 +352,8 @@ const ImportManagement = () => {
     const handleDownloadAll = async () => {
         if (selectedRows.size === 0) { toast.error('Please select at least one row to download'); return; }
         try {
-            const cardIdsToUpdate = Array.from(selectedRows).map(i => cardIds[i]).filter(Boolean);
-            if (cardIdsToUpdate.length > 0) {
-                await supabase.from('id_cards').update({ print_status: 'printed', updated_at: new Date().toISOString() }).in('id', cardIdsToUpdate);
-                await supabase.from('vendor_requests').update({ status: 'completed', created_at: new Date().toISOString() }).in('id_card_id', cardIdsToUpdate);
-                const { data: updatedCards } = await supabase.from('id_cards').select('id, print_status').in('id', cardIdsToUpdate);
-                const newStatuses = { ...cardPrintStatuses };
-                if (updatedCards) {
-                    updatedCards.forEach(card => {
-                        for (const rowIndex of selectedRows) {
-                            if (cardIds[rowIndex] === card.id) newStatuses[rowIndex] = card.print_status || 'printed';
-                        }
-                    });
-                } else {
-                    for (const rowIndex of selectedRows) newStatuses[rowIndex] = 'printed';
-                }
-                setCardPrintStatuses(newStatuses);
-            }
-
-            const fullNameIndex = headers.indexOf('Full Name');
+            const lc = headers.map(h => String(h || '').toLowerCase().trim());
+            const fullNameIndex = lc.findIndex(h => h === 'full name' || h === 'name');
             const masterZip = new JSZip();
             let hasValidZips = false;
             for (const rowIndex of selectedRows) {
@@ -418,17 +394,19 @@ const ImportManagement = () => {
         const dataWithIndex = csvData.map((row, index) => ({ row, index }));
         if (filterAvailableOnly) return dataWithIndex.filter(({ index }) => isZipAvailable(index));
         if (!searchQuery) return dataWithIndex;
-        const q = searchQuery.toLowerCase();
-        const nameIndex = headers.indexOf('Full Name');
-        const idIndex = headers.indexOf('Employee ID');
-        const branchIndex = headers.indexOf('Branch');
+        const q = searchQuery.toLowerCase().trim();
+        const lc = headers.map(h => String(h || '').toLowerCase().trim());
+        const nameIndex = lc.findIndex(h => h === 'full name' || h === 'name' || h === 'employee name');
+        const idIndex = lc.findIndex(h => h === 'employee id' || h === 'id' || h === 'employeeid' || h === 'emp id');
+        const branchIndex = lc.findIndex(h => h === 'branch' || h === 'location');
         return dataWithIndex.filter(({ row }) => {
-            const name = nameIndex !== -1 ? String(row[nameIndex] ?? '').toLowerCase() : '';
-            const id = idIndex !== -1 ? String(row[idIndex] ?? '').toLowerCase() : '';
-            const branch = branchIndex !== -1 ? String(row[branchIndex] ?? '').toLowerCase() : '';
-            return name.includes(q) || id.includes(q) || branch.includes(q);
+            if (nameIndex !== -1 && String(row[nameIndex] ?? '').toLowerCase().includes(q)) return true;
+            if (idIndex !== -1 && String(row[idIndex] ?? '').toLowerCase().includes(q)) return true;
+            if (branchIndex !== -1 && String(row[branchIndex] ?? '').toLowerCase().includes(q)) return true;
+            // fallback: search all columns
+            return row.some(cell => String(cell ?? '').toLowerCase().includes(q));
         });
-    }, [csvData, searchQuery, filterAvailableOnly, zipUrls]);
+    }, [csvData, searchQuery, filterAvailableOnly, zipUrls, headers]);
 
     const handleRowCheckboxChange = (rowIndex: number) => {
         const next = new Set(selectedRows);
@@ -447,6 +425,11 @@ const ImportManagement = () => {
     };
 
     const photoColumnIndex = getPhotoColumnIndex();
+    const nameColumnIndex = React.useMemo(() => {
+        const lc = headers.map(h => String(h || '').toLowerCase().trim());
+        const i = lc.findIndex(h => h === 'full name' || h === 'name' || h === 'employee name');
+        return i;
+    }, [headers]);
 
     const handleDeleteSelectedRows = () => {
         if (selectedRows.size === 0) { toast.error('No rows selected'); return; }
@@ -584,7 +567,7 @@ const ImportManagement = () => {
             fullName: nameIndex !== -1 ? String(row[nameIndex] || '') : 'Unknown',
             employeeId: idIndex !== -1 ? String(row[idIndex] || '') : '',
             bloodGroup: bgIndex !== -1 ? String(row[bgIndex] || '') : '',
-            branch: branchIndex !== -1 ? String(row[branchIndex] || '') : '',
+            branch: branchIndex !== -1 ? String(row[branchIndex] || '').toUpperCase().trim() : '',
             emergencyContact: ecIndex !== -1 ? String(row[ecIndex] || '') : '',
             photo: photoIndex !== -1 ? String(row[photoIndex] || '') : '',
             photo_url: photoIndex !== -1 ? String(row[photoIndex] || '') : '',
@@ -593,11 +576,24 @@ const ImportManagement = () => {
         };
     };
 
-    const handleViewCard = (row: string[], rowIndex: number) => {
+    const handleViewCard = async (row: string[], rowIndex: number) => {
         const employee = csvRowToEmployee(row, rowIndex);
         if (cardPhotoUrls[rowIndex]) {
             employee.photo_url = cardPhotoUrls[rowIndex];
             employee.photo = cardPhotoUrls[rowIndex];
+        }
+        // If branch is missing from CSV, fetch it from the employee record in DB
+        if (!employee.branch) {
+            const cardId = cardIds[rowIndex];
+            if (cardId) {
+                const { data: cardData } = await supabase
+                    .from('id_cards')
+                    .select('employees(branch)')
+                    .eq('id', cardId)
+                    .maybeSingle();
+                const branch = (cardData?.employees as any)?.branch;
+                if (branch) employee.branch = String(branch).toUpperCase().trim();
+            }
         }
         setCardViewEmployee(employee);
         setIsCardViewOpen(true);
@@ -606,9 +602,17 @@ const ImportManagement = () => {
 
     const handlePrintCompleted = async () => {
         if (selectedRows.size === 0) { toast.error('Please select at least one card.'); return; }
+        const eligible = Array.from(selectedRows).filter(i => cardPrintStatuses[i] === 'sent_for_printing');
+        if (eligible.length === 0) {
+            toast.error('Selected cards must be sent to print first before marking as printed.');
+            return;
+        }
+        if (eligible.length < selectedRows.size) {
+            toast.warning(`Only ${eligible.length} of ${selectedRows.size} selected cards are in "Sent to Print" status. Others will be skipped.`);
+        }
         setIsDownloading(true);
         try {
-            for (const rowIndex of selectedRows) {
+            for (const rowIndex of eligible) {
                 const cardId = cardIds[rowIndex];
                 if (cardId) {
                     await supabase.from('id_cards').update({ status: 'printed', print_status: 'printed' }).eq('id', cardId);
@@ -622,7 +626,7 @@ const ImportManagement = () => {
                     await supabase.from('card_batches').update({ status: 'completed' }).eq('batch_id', batchId);
                 }
             }
-            toast.success(`${selectedRows.size} card(s) marked as printed`);
+            toast.success(`${eligible.length} card(s) marked as printed`);
             setSelectedRows(new Set());
         } catch {
             toast.error('Failed to mark as printed');
@@ -733,7 +737,7 @@ const ImportManagement = () => {
             <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 lg:py-10">
 
                 {/* Page Header */}
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
                     <div className="flex items-center gap-3">
                         <button
                             onClick={() => navigate(-1)}
@@ -750,7 +754,8 @@ const ImportManagement = () => {
                             )}
                         </div>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
+                    {/* Persistent page-level actions */}
+                    <div className="flex items-center gap-2">
                         {batchId && (
                             <button
                                 onClick={handleDeleteBatch}
@@ -760,37 +765,6 @@ const ImportManagement = () => {
                                 <Trash2 size={14} /> Delete Batch
                             </button>
                         )}
-                        <button
-                            onClick={handleDownloadAll}
-                            disabled={selectedRows.size === 0}
-                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-500 text-white text-sm font-medium hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                        >
-                            <Download size={14} /> Download ({selectedRows.size})
-                        </button>
-                        <button
-                            onClick={handleDeleteSelectedRows}
-                            disabled={selectedRows.size === 0}
-                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-red-500 text-white text-sm font-medium hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                        >
-                            <Trash2 size={14} /> Delete ({selectedRows.size})
-                        </button>
-                        <button
-                            onClick={() => setIsVendorModalOpen(true)}
-                            disabled={selectedRows.size === 0 || isDownloading}
-                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-500 text-white text-sm font-medium hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                        >
-                            {isDownloading ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                            {isDownloading ? 'Processing...' : `Send to Print (${selectedRows.size})`}
-                        </button>
-                        <button
-                            onClick={handlePrintCompleted}
-                            disabled={selectedRows.size === 0 || isDownloading}
-                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-green-500 text-white text-sm font-medium hover:bg-green-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                            title="Mark as printed without sending to vendor (offline/out-of-network)"
-                        >
-                            <CheckCircle2 size={14} />
-                            Print Completed
-                        </button>
                         <button
                             onClick={() => setIsColumnModalOpen(true)}
                             disabled={headers.length === 0}
@@ -805,6 +779,45 @@ const ImportManagement = () => {
                         >
                             {isSaving ? <Loader2 size={14} className="animate-spin" /> : null}
                             {isSaving ? 'Saving...' : 'Save Batch'}
+                        </button>
+                    </div>
+                </div>
+
+                {/* Contextual selection toolbar */}
+                <div className={`mb-4 overflow-hidden transition-all duration-200 ${selectedRows.size > 0 ? 'max-h-20 opacity-100' : 'max-h-0 opacity-0'}`}>
+                    <div className="flex flex-wrap items-center gap-2 px-4 py-3 bg-orange-50 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-800/30 rounded-2xl">
+                        <span className="text-sm font-medium text-orange-700 dark:text-orange-400 mr-1">
+                            {selectedRows.size} selected
+                        </span>
+                        <div className="w-px h-4 bg-orange-200 dark:bg-orange-700 mx-1" />
+                        <button
+                            onClick={handleDownloadAll}
+                            disabled={isDownloading}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 text-white text-sm font-medium hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        >
+                            <Download size={14} /> Download
+                        </button>
+                        <button
+                            onClick={() => setIsVendorModalOpen(true)}
+                            disabled={isDownloading}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-500 text-white text-sm font-medium hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        >
+                            {isDownloading ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                            {isDownloading ? 'Processing...' : 'Send to Print'}
+                        </button>
+                        <button
+                            onClick={handlePrintCompleted}
+                            disabled={isDownloading}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-green-500 text-white text-sm font-medium hover:bg-green-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                            title="Mark as printed without sending to vendor"
+                        >
+                            <CheckCircle2 size={14} /> Print Completed
+                        </button>
+                        <button
+                            onClick={handleDeleteSelectedRows}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-red-200 dark:border-red-800/40 text-red-600 dark:text-red-400 text-sm font-medium hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                        >
+                            <Trash2 size={14} /> Delete
                         </button>
                     </div>
                 </div>
@@ -889,12 +902,13 @@ const ImportManagement = () => {
                                         />
                                     </th>
                                     <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Sl. No</th>
-                                    {headers.map(header => {
+                                    {headers.map((header, idx) => {
                                         if (header.toLowerCase() === 'photo_url') return null;
-                                        const display = (header.toLowerCase() === 'photo' || header.toLowerCase() === 'photo (upload)') ? 'Photo' : header;
+                                        // hide standalone photo column — shown inline with name
+                                        if (idx === photoColumnIndex) return null;
                                         return (
                                             <th key={header} className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                                {display}
+                                                {header}
                                             </th>
                                         );
                                     })}
@@ -923,15 +937,24 @@ const ImportManagement = () => {
                                             <td className="px-5 py-4 text-sm text-gray-500 dark:text-gray-400">{displayIdx + 1}</td>
                                             {row.map((cell, j) => {
                                                 if (headers[j]?.toLowerCase() === 'photo_url') return null;
-                                                if (j === photoColumnIndex) {
-                                                    const src = typeof cell === 'string' && !cell.includes('image/fetch/') && !cell.startsWith('blob:') && (cell.startsWith('http') || cell.startsWith('data:')) ? cell : null;
+                                                // skip standalone photo column — rendered inline with name
+                                                if (j === photoColumnIndex) return null;
+                                                if (j === nameColumnIndex) {
+                                                    const photoCell = photoColumnIndex !== -1 ? row[photoColumnIndex] : '';
+                                                    const src = typeof photoCell === 'string' && !photoCell.includes('image/fetch/') && !photoCell.startsWith('blob:') && (photoCell.startsWith('http') || photoCell.startsWith('data:')) ? photoCell : (cardPhotoUrls[i] || null);
+                                                    const initials = String(cell || '').trim().charAt(0).toUpperCase();
                                                     return (
                                                         <td key={j} className="px-5 py-4">
-                                                            {src ? (
-                                                                <img src={src} alt="" className="w-9 h-9 rounded-full border border-gray-200 dark:border-gray-600 object-cover" onError={e => e.currentTarget.classList.add('hidden')} />
-                                                            ) : (
-                                                                <div className="w-9 h-9 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-xs text-gray-500">-</div>
-                                                            )}
+                                                            <div className="flex items-center gap-2.5">
+                                                                {src ? (
+                                                                    <img src={src} alt="" className="w-8 h-8 rounded-full border border-gray-200 dark:border-gray-600 object-cover flex-shrink-0" onError={e => { e.currentTarget.style.display = 'none'; }} />
+                                                                ) : (
+                                                                    <div className="w-8 h-8 rounded-full bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center text-xs font-semibold text-orange-600 dark:text-orange-400 flex-shrink-0">
+                                                                        {initials || '?'}
+                                                                    </div>
+                                                                )}
+                                                                <span className="text-sm text-gray-700 dark:text-gray-300">{cell}</span>
+                                                            </div>
                                                         </td>
                                                     );
                                                 }

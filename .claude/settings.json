@@ -1,4 +1,18 @@
 {
+  "permissions": {
+    "allow": [
+      "Skill(agent-browser)",
+      "Skill(agent-browser:*)",
+      "Bash(node -e \"console.log\\(Object.keys\\(require\\('lucide-react'\\)\\).filter\\(k=>/Column/i.test\\(k\\)\\)\\)\")",
+      "Bash(node -e \"console.log\\(Object.keys\\(require\\('lucide-react'\\)\\).filter\\(k=>/^Columns/.test\\(k\\)\\)\\)\")",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(agent-browser skills *)",
+      "Bash(agent-browser open *)",
+      "Bash(agent-browser wait *)",
+      "Bash(agent-browser screenshot *)"
+    ]
+  },
   "mcpServers": {
     "supabase": {
       "type": "http",
