@@ -56,25 +56,30 @@ const StepWizard: React.FC<StepWizardProps> = ({ steps, currentStep, onStepClick
   return (
     <div ref={wrapperRef}>
       {/* Step indicator */}
-      <div className="px-5 pt-5 pb-4">
+      <div className="px-5 pt-4 pb-3">
         <div className="relative flex justify-between items-start">
-          {/* Background track */}
-          <div className="absolute left-3.5 right-3.5 top-3.5 h-0.5 bg-gray-200 dark:bg-gray-700" />
-          {/* Animated progress fill */}
-          <div
-            ref={progressBarRef}
-            className="absolute left-3.5 top-3.5 h-0.5 bg-gradient-to-r from-orange-400 to-orange-600"
-            style={{ width: '0%' }}
-          />
+          {/* Background track (inset so it runs centre-to-centre between the first and last circle) */}
+          <div className="absolute left-8 right-8 top-4 h-0.5 bg-gray-200 dark:bg-gray-700">
+            {/* Animated progress fill */}
+            <div
+              ref={progressBarRef}
+              className="h-full bg-gradient-to-r from-orange-400 to-orange-600"
+              style={{ width: '0%' }}
+            />
+          </div>
           {steps.map((step, i) => {
             const done = i < currentStep;
             const active = i === currentStep;
             return (
-              <div key={i} className="flex flex-col items-center gap-1.5 z-10">
-                <button
-                  type="button"
-                  onClick={() => done && onStepClick?.(i)}
-                  className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-200 ${
+              <button
+                key={i}
+                type="button"
+                onClick={() => done && onStepClick?.(i)}
+                disabled={!done}
+                className="flex flex-col items-center gap-1 z-10 min-w-[64px] disabled:cursor-default"
+              >
+                <span
+                  className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-200 ${
                     done
                       ? 'bg-orange-500 text-white shadow-sm shadow-orange-200 dark:shadow-orange-900/30 cursor-pointer hover:bg-orange-600'
                       : active
@@ -83,13 +88,13 @@ const StepWizard: React.FC<StepWizardProps> = ({ steps, currentStep, onStepClick
                   }`}
                 >
                   {done ? (
-                    <span className="material-symbols-outlined" style={{ fontSize: 14 }}>check</span>
+                    <span className="material-symbols-outlined" style={{ fontSize: 16 }}>check</span>
                   ) : (
                     i + 1
                   )}
-                </button>
+                </span>
                 <span
-                  className={`text-[9px] font-semibold uppercase tracking-wider ${
+                  className={`text-[10px] md:text-[11px] font-semibold uppercase tracking-wider ${
                     active
                       ? 'text-orange-500'
                       : done
@@ -99,7 +104,7 @@ const StepWizard: React.FC<StepWizardProps> = ({ steps, currentStep, onStepClick
                 >
                   {step.label}
                 </span>
-              </div>
+              </button>
             );
           })}
         </div>
@@ -108,7 +113,7 @@ const StepWizard: React.FC<StepWizardProps> = ({ steps, currentStep, onStepClick
       <div className="border-t border-gray-100 dark:border-gray-800" />
 
       {/* Animated content area */}
-      <div ref={contentRef} className="p-4">
+      <div ref={contentRef} className="p-4 md:p-5">
         {childArray[currentStep]}
       </div>
     </div>

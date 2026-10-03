@@ -59,7 +59,7 @@ const userItems = (openProfile: () => void, showAdminLink?: boolean): CardNavIte
     bgColor: "#1B1722",
     textColor: "#fff",
     links: [
-      ...(showAdminLink || userRole === 'super_admin' ? [{ label: "Admin Dashboard", href: "/dashboard", ariaLabel: "Switch to Admin Dashboard" }] : []),
+      ...(showAdminLink ? [{ label: "Admin Dashboard", href: "/dashboard", ariaLabel: "Switch to Admin Dashboard" }] : []),
       { label: "Overview", href: "/user-dashboard", ariaLabel: "User Dashboard" },
       { label: "Raise New Card", href: "/employee-page", ariaLabel: "Request New ID Card" },
     ]

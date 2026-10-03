@@ -67,7 +67,7 @@ export const EmployeeForm: React.FC<EmployeeFormProps> = ({
   };
 
   return (
-    <div className="space-y-4">
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-1 gap-4">
       {/* Full Name */}
       <div className="space-y-1.5">
         <label className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
@@ -79,7 +79,7 @@ export const EmployeeForm: React.FC<EmployeeFormProps> = ({
           value={employee.fullName}
           onChange={(e) => handleInputChange('fullName', e.target.value)}
           placeholder="SHAIK AMEER BHASHA"
-          className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm placeholder:text-gray-400 focus:ring-2 focus:ring-orange-500/20 focus:border-orange-400 outline-none transition-all uppercase"
+          className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm placeholder:text-gray-400 focus:ring-2 focus:ring-orange-500/20 focus:border-orange-400 outline-none transition-all uppercase"
         />
       </div>
 
@@ -95,7 +95,7 @@ export const EmployeeForm: React.FC<EmployeeFormProps> = ({
           onChange={(e) => handleInputChange('employeeId', e.target.value)}
           onBlur={() => handleBlur('employeeId')}
           placeholder="CLOVE-1027"
-          className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm placeholder:text-gray-400 focus:ring-2 focus:ring-orange-500/20 focus:border-orange-400 outline-none transition-all uppercase"
+          className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm placeholder:text-gray-400 focus:ring-2 focus:ring-orange-500/20 focus:border-orange-400 outline-none transition-all uppercase"
         />
       </div>
 
@@ -108,7 +108,7 @@ export const EmployeeForm: React.FC<EmployeeFormProps> = ({
         <select
           value={employee.bloodGroup}
           onChange={(e) => handleInputChange('bloodGroup', e.target.value)}
-          className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-orange-500/20 focus:border-orange-400 outline-none transition-all"
+          className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-orange-500/20 focus:border-orange-400 outline-none transition-all"
         >
           <option value="">Select blood group</option>
           {BLOOD_GROUPS.map((group) => (
@@ -117,8 +117,37 @@ export const EmployeeForm: React.FC<EmployeeFormProps> = ({
         </select>
       </div>
 
-      {/* Branch */}
+      {/* Emergency Contact */}
       <div className="space-y-1.5">
+        <label className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
+          <Phone size={14} className="text-orange-500" />
+          Emergency Contact
+        </label>
+        <div className="flex gap-2">
+          <select
+            value={employee.countryCode}
+            onChange={(e) => handleInputChange('countryCode', e.target.value)}
+            className="px-3 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-orange-500/20 focus:border-orange-400 outline-none transition-all"
+          >
+            {COUNTRY_CODES.map((country) => (
+              <option key={country.code} value={country.code}>
+                {country.flag} {country.label}
+              </option>
+            ))}
+          </select>
+          <input
+            type="tel"
+            value={employee.emergencyContact}
+            onChange={(e) => handleInputChange('emergencyContact', e.target.value)}
+            maxLength={10}
+            placeholder="9876543210"
+            className="flex-1 min-w-0 px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm placeholder:text-gray-400 focus:ring-2 focus:ring-orange-500/20 focus:border-orange-400 outline-none transition-all"
+          />
+        </div>
+      </div>
+
+      {/* Branch */}
+      <div className="space-y-1.5 md:col-span-2 lg:col-span-1">
         <label className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
           <MapPin size={14} className="text-orange-500" />
           Branch
@@ -131,7 +160,7 @@ export const EmployeeForm: React.FC<EmployeeFormProps> = ({
                 key={branch.id}
                 type="button"
                 onClick={() => handleInputChange('branch', branch.name)}
-                className={`px-3 py-1.5 rounded-xl text-sm font-medium border transition-all ${
+                className={`px-3.5 py-2 min-h-[40px] rounded-xl text-sm font-medium border transition-all ${
                   selected
                     ? 'bg-gradient-to-r from-orange-400 to-orange-600 text-white border-orange-500 shadow-sm shadow-orange-200 dark:shadow-orange-900/30'
                     : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
@@ -147,38 +176,9 @@ export const EmployeeForm: React.FC<EmployeeFormProps> = ({
         </div>
       </div>
 
-      {/* Emergency Contact */}
-      <div className="space-y-1.5">
-        <label className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
-          <Phone size={14} className="text-orange-500" />
-          Emergency Contact
-        </label>
-        <div className="flex gap-2">
-          <select
-            value={employee.countryCode}
-            onChange={(e) => handleInputChange('countryCode', e.target.value)}
-            className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-orange-500/20 focus:border-orange-400 outline-none transition-all"
-          >
-            {COUNTRY_CODES.map((country) => (
-              <option key={country.code} value={country.code}>
-                {country.flag} {country.label}
-              </option>
-            ))}
-          </select>
-          <input
-            type="tel"
-            value={employee.emergencyContact}
-            onChange={(e) => handleInputChange('emergencyContact', e.target.value)}
-            maxLength={10}
-            placeholder="9876543210"
-            className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm placeholder:text-gray-400 focus:ring-2 focus:ring-orange-500/20 focus:border-orange-400 outline-none transition-all"
-          />
-        </div>
-      </div>
-
       {/* Optional Image Adjustments (used in EditRequest inline layout) */}
       {filters && onFiltersChange && (
-        <div className="border-t border-gray-200 dark:border-gray-700 pt-4 mt-2">
+        <div className="border-t border-gray-200 dark:border-gray-700 pt-4 mt-2 md:col-span-2 lg:col-span-1">
           <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Image Adjustments</p>
           <ImageAdjustments
             brightness={filters.brightness}

@@ -173,6 +173,13 @@ const SingleCard: React.FC = () => {
     });
 
     const [wizardStep, setWizardStep] = useState(0);
+    // phones show one card at a time; tablets/desktop show both side by side
+    const [previewSide, setPreviewSide] = useState<'front' | 'back'>('front');
+    const [showAdjustments, setShowAdjustments] = useState(false);
+
+    useEffect(() => {
+        if (wizardStep === 1) setPreviewSide('front');
+    }, [wizardStep]);
     const [saveProgress, setSaveProgress] = useState(0);
     const [saveMessage, setSaveMessage] = useState('');
     const [showSaveProgress, setShowSaveProgress] = useState(false);
@@ -715,6 +722,7 @@ const SingleCard: React.FC = () => {
             lastObjectUrlRef.current = null;
         }
         setShowUploadNote(true);
+        setWizardStep(0);
     }, []);
 
     // keep drawEditor in sync when editor transform changes (i.e. redraw)
@@ -993,6 +1001,52 @@ const SingleCard: React.FC = () => {
         }
     };
 
+    const downloadPng = async () => {
+        toast.info('Generating PNG files...');
+        const f = document.querySelector('.id-card-front-container') as HTMLElement;
+        const b = document.querySelector('.id-card-back-container') as HTMLElement;
+        if (!f || !b) { toast.error('Card elements not found.'); return; }
+        try {
+            const [fc, bc] = await Promise.all([generateCardCanvas(f, true), generateCardCanvas(b, false)]);
+            const dl = (c: HTMLCanvasElement, n: string) => c.toBlob((bl) => { if (bl) { const u = URL.createObjectURL(bl); const a = document.createElement('a'); a.href=u; a.download=n; a.click(); URL.revokeObjectURL(u); }}, 'image/png', 1.0);
+            dl(fc, `${employee.fullName||'id'}_front.png`);
+            dl(bc, `${employee.fullName||'id'}_back.png`);
+            toast.success('PNG downloaded!');
+        } catch { toast.error('PNG generation failed.'); }
+    };
+
+    const downloadPdf = async () => {
+        toast.info('Generating PDF...');
+        const f = document.querySelector('.id-card-front-container') as HTMLElement;
+        const b = document.querySelector('.id-card-back-container') as HTMLElement;
+        if (!f || !b) { toast.error('Card elements not found.'); return; }
+        try {
+            const [fc, bc] = await Promise.all([generateCardCanvas(f, true), generateCardCanvas(b, false)]);
+            const { jsPDF } = await import('jspdf');
+            const pdf = new jsPDF({ orientation: 'portrait', unit: 'cm', format: [5.3, 8.5] });
+            pdf.addImage(fc.toDataURL('image/png',1.0),'PNG',0,0,5.3,8.5); pdf.addPage(); pdf.addImage(bc.toDataURL('image/png',1.0),'PNG',0,0,5.3,8.5);
+            pdf.save(`${employee.fullName||'id'}_cards.pdf`);
+            toast.success('PDF downloaded!');
+        } catch { toast.error('PDF generation failed.'); }
+    };
+
+    const goToPhotoStep = () => {
+        const missingFieldsMessage = getRequiredFieldsToastMessage(employee);
+        if (missingFieldsMessage) {
+            toast.error(missingFieldsMessage);
+            return;
+        }
+        setWizardStep(1);
+    };
+
+    // On phones the inactive card sits directly behind the visible one. It stays
+    // rendered at full size so html2canvas capture and photo dragging keep working.
+    const stackedBehind = 'max-md:absolute max-md:top-0 max-md:left-0 max-md:-z-10 max-md:pointer-events-none';
+
+    const primaryBtn = 'flex items-center justify-center gap-2 h-12 rounded-xl bg-gradient-to-r from-orange-400 to-orange-600 text-white text-sm font-semibold hover:opacity-90 active:opacity-80 disabled:opacity-40 transition-opacity';
+    const secondaryBtn = 'flex items-center justify-center gap-1.5 h-11 rounded-xl border border-gray-200 dark:border-gray-700 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 active:bg-gray-100 dark:active:bg-gray-800 transition-colors';
+    const toolBtn = 'flex-1 flex items-center justify-center h-11 rounded-xl bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 active:bg-gray-300 disabled:opacity-40 transition-colors';
+
     return (
         <div className="min-h-screen bg-background">
             <ProgressBar
@@ -1003,19 +1057,41 @@ const SingleCard: React.FC = () => {
             />
             <AppHeader />
 
-            <main className="max-w-[1150px] mx-auto p-3 lg:p-6">
+            <main className="max-w-[1150px] mx-auto px-4 py-3 md:px-6 lg:py-6">
                 <button
                     onClick={() => navigate(-1)}
-                    className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-3 transition-colors"
+                    className="flex items-center gap-1 h-9 -ml-1 px-1 text-sm text-muted-foreground hover:text-foreground mb-2 transition-colors"
                 >
                     <span className="material-symbols-outlined text-lg">arrow_back</span>
-                    <span className="hidden md:inline">Back</span>
+                    <span>Back</span>
                 </button>
-                <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-6">
-                    {/* Left: Card Previews */}
-                    <div className="space-y-4">
-                        <div className="flex flex-col items-center gap-4 lg:flex-row lg:justify-center lg:gap-6">
-                            <div className="id-card-front-container w-[230px] h-[365px] bg-white shadow-sm rounded-lg overflow-hidden">
+                <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-4 md:gap-6">
+                    {/* Card previews: side by side on tablet/desktop, Front/Back toggle on phones */}
+                    <div className="space-y-3 lg:sticky lg:top-4 self-start">
+                        <div className="md:hidden flex justify-center">
+                            <div className="inline-flex p-1 rounded-xl bg-gray-100 dark:bg-gray-800">
+                                {(['front', 'back'] as const).map((side) => (
+                                    <button
+                                        key={side}
+                                        type="button"
+                                        onClick={() => setPreviewSide(side)}
+                                        className={`h-9 px-5 rounded-lg text-sm font-medium capitalize transition-all ${
+                                            previewSide === side
+                                                ? 'bg-white dark:bg-gray-700 shadow-sm text-gray-900 dark:text-white'
+                                                : 'text-gray-500 dark:text-gray-400'
+                                        }`}
+                                    >
+                                        {side}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="relative isolate mx-auto w-[230px] md:w-auto flex flex-row items-start justify-center gap-4 md:gap-6">
+                            <div
+                                aria-hidden={previewSide !== 'front' ? true : undefined}
+                                className={`id-card-front-container shrink-0 w-[230px] h-[365px] bg-white shadow-sm rounded-lg overflow-hidden ${previewSide !== 'front' ? stackedBehind : ''}`}
+                            >
                                 <IDCardFront
                                     employee={employee}
                                     logoSrc={frontLogoDataUrl}
@@ -1027,15 +1103,25 @@ const SingleCard: React.FC = () => {
                                     isLoadingImage={isLoadingImage}
                                 />
                             </div>
-                            <div className="id-card-back-container w-[230px] h-[365px] bg-white shadow-sm rounded-lg overflow-hidden">
+                            <div
+                                aria-hidden={previewSide !== 'back' ? true : undefined}
+                                className={`id-card-back-container shrink-0 w-[230px] h-[365px] bg-white shadow-sm rounded-lg overflow-hidden ${previewSide !== 'back' ? stackedBehind : ''}`}
+                            >
                                 <IDCardBack employee={employee} logoSrc={backLogoDataUrl} />
                             </div>
                         </div>
+
+                        {wizardStep === 1 && editor.img && (
+                            <p className="flex items-center justify-center gap-1 text-xs text-muted-foreground">
+                                <span className="material-symbols-outlined text-sm">pan_tool</span>
+                                Drag the photo on the card to position it
+                            </p>
+                        )}
                         <CardSaveProgress isVisible={showSaveProgress} progress={saveProgress} message={saveMessage} />
                     </div>
 
-                    {/* Right: Step Wizard */}
-                    <div className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 overflow-hidden self-start">
+                    {/* Step wizard */}
+                    <div className="w-full md:max-w-2xl md:mx-auto lg:max-w-none bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 overflow-hidden self-start">
                         <StepWizard
                             steps={[
                                 { label: 'Details', icon: 'badge' },
@@ -1048,25 +1134,14 @@ const SingleCard: React.FC = () => {
                             {/* Step 0 — Employee Details */}
                             <div className="space-y-5">
                                 <EmployeeForm employee={employee} onEmployeeChange={setEmployee} />
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        const missingFieldsMessage = getRequiredFieldsToastMessage(employee);
-                                        if (missingFieldsMessage) {
-                                            toast.error(missingFieldsMessage);
-                                            return;
-                                        }
-                                        setWizardStep(1);
-                                    }}
-                                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-r from-orange-400 to-orange-600 text-white text-sm font-semibold hover:opacity-90 transition-opacity"
-                                >
-                                    Continue to Photo
-                                    <span className="material-symbols-outlined text-base">arrow_forward</span>
+                                <button type="button" onClick={goToPhotoStep} className={`w-full ${primaryBtn}`}>
+                                    Next: Add Photo
+                                    <span className="material-symbols-outlined text-lg">arrow_forward</span>
                                 </button>
                             </div>
 
-                            {/* Step 1 — Photo Upload */}
-                            <div className="space-y-3">
+                            {/* Step 1 — Photo */}
+                            <div className="space-y-4">
                                 <PhotoUpload
                                     onPhotoSelect={handlePhotoSelect}
                                     currentPhoto={employee.photo}
@@ -1075,133 +1150,147 @@ const SingleCard: React.FC = () => {
                                     onShowModal={handleShowModal}
                                     isLoadingImage={isLoadingImage}
                                     enableCamera
+                                    hasPhoto={!!editor.img}
                                 />
-                                {editor.img && (
-                                    <div className="border-t border-gray-100 dark:border-gray-800 pt-3 space-y-2">
-                                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Position &amp; Zoom</p>
-                                        <div className="flex gap-1.5 flex-wrap">
-                                            <button onClick={handleZoomIn} disabled={!editor.img} className="flex-1 min-w-[36px] px-2 py-2 text-sm font-bold bg-primary hover:bg-primary/90 disabled:opacity-40 text-white rounded-lg transition-colors">＋</button>
-                                            <button onClick={handleZoomOut} disabled={!editor.img} className="flex-1 min-w-[36px] px-2 py-2 text-sm font-bold bg-primary hover:bg-primary/90 disabled:opacity-40 text-white rounded-lg transition-colors">−</button>
-                                            <button onClick={handleRotateLeft} disabled={!editor.img} className="flex-1 min-w-[36px] px-2 py-2 text-sm bg-primary hover:bg-primary/90 disabled:opacity-40 text-white rounded-lg transition-colors">⟲</button>
-                                            <button onClick={handleRotateRight} disabled={!editor.img} className="flex-1 min-w-[36px] px-2 py-2 text-sm bg-primary hover:bg-primary/90 disabled:opacity-40 text-white rounded-lg transition-colors">⟳</button>
-                                            <button onClick={handleResetPos} disabled={!editor.img} className="flex-1 min-w-[36px] px-2 py-2 text-xs bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 disabled:opacity-40 text-gray-800 dark:text-gray-200 rounded-lg transition-colors">Reset</button>
+                                {editor.img && !isLoadingImage && (
+                                    <div className="border-t border-gray-100 dark:border-gray-800 pt-4 space-y-3">
+                                        <div className="flex items-center justify-between">
+                                            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Position &amp; Zoom</p>
+                                            <span className="text-xs text-muted-foreground tabular-nums">
+                                                {editor.scale.toFixed(2)}x · {Math.round((editor.rotation * 180) / Math.PI)}°
+                                            </span>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <button type="button" onClick={handleZoomOut} title="Zoom out" className={toolBtn}>
+                                                <span className="material-symbols-outlined text-xl">zoom_out</span>
+                                            </button>
+                                            <button type="button" onClick={handleZoomIn} title="Zoom in" className={toolBtn}>
+                                                <span className="material-symbols-outlined text-xl">zoom_in</span>
+                                            </button>
+                                            <button type="button" onClick={handleRotateLeft} title="Rotate left" className={toolBtn}>
+                                                <span className="material-symbols-outlined text-xl">rotate_left</span>
+                                            </button>
+                                            <button type="button" onClick={handleRotateRight} title="Rotate right" className={toolBtn}>
+                                                <span className="material-symbols-outlined text-xl">rotate_right</span>
+                                            </button>
+                                            <button type="button" onClick={handleResetPos} title="Reset position" className={toolBtn}>
+                                                <span className="material-symbols-outlined text-xl">restart_alt</span>
+                                            </button>
                                         </div>
                                         <input
                                             type="range" min="0.5" max="3" step="0.01"
                                             value={editor.scale}
                                             onChange={(e) => setEditor(prev => ({ ...prev, scale: parseFloat(e.target.value) }))}
-                                            className="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full appearance-none cursor-pointer accent-primary"
+                                            aria-label="Zoom"
+                                            className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-full appearance-none cursor-pointer accent-primary [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-6 [&::-webkit-slider-thumb]:h-6 [&::-webkit-slider-thumb]:bg-orange-500 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow"
                                         />
-                                        <div className="flex justify-between text-xs text-muted-foreground">
-                                            <span>Zoom: {editor.scale.toFixed(2)}x</span>
-                                            <span>Rotation: {Math.round((editor.rotation * 180) / Math.PI)}°</span>
-                                        </div>
                                     </div>
                                 )}
-                                <div className="flex gap-2 pt-1">
-                                    <button
-                                        type="button"
-                                        onClick={() => setWizardStep(0)}
-                                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-                                    >
-                                        <span className="material-symbols-outlined text-base">arrow_back</span>
+                                <div className="grid grid-cols-[auto_1fr] gap-2 pt-1">
+                                    <button type="button" onClick={() => setWizardStep(0)} className={`px-4 ${secondaryBtn}`}>
+                                        <span className="material-symbols-outlined text-lg">arrow_back</span>
                                         Back
                                     </button>
                                     <button
                                         type="button"
                                         onClick={() => setWizardStep(2)}
-                                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-gradient-to-r from-orange-400 to-orange-600 text-white text-sm font-semibold hover:opacity-90 transition-opacity"
+                                        disabled={isLoadingImage}
+                                        className={primaryBtn}
                                     >
-                                        Finalise
-                                        <span className="material-symbols-outlined text-base">arrow_forward</span>
+                                        {editor.img ? 'Next: Finalise' : 'Skip photo for now'}
+                                        <span className="material-symbols-outlined text-lg">arrow_forward</span>
                                     </button>
                                 </div>
                             </div>
 
-                            {/* Step 2 — Enhance & Export */}
+                            {/* Step 2 — Finalise */}
                             <div className="space-y-4">
-                                <ImageAdjustments
-                                    brightness={filters.brightness}
-                                    contrast={filters.contrast}
-                                    saturation={filters.saturation}
-                                    shadow={filters.shadow}
-                                    onBrightnessChange={(val) => setFilters(prev => ({ ...prev, brightness: val }))}
-                                    onContrastChange={(val) => setFilters(prev => ({ ...prev, contrast: val }))}
-                                    onSaturationChange={(val) => setFilters(prev => ({ ...prev, saturation: val }))}
-                                    onShadowChange={(val) => setFilters(prev => ({ ...prev, shadow: val }))}
-                                    onAutoEnhance={handleAutoEnhance}
-                                    onResetFilters={handleResetFilters}
-                                    hasImage={!!editor.img}
-                                />
-                                <div className="border-t border-gray-100 dark:border-gray-800 pt-4 space-y-2">
+                                {editor.img && (
+                                    <div className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowAdjustments((v) => !v)}
+                                            className="w-full flex items-center justify-between h-12 px-4 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                                        >
+                                            <span className="flex items-center gap-2">
+                                                <span className="material-symbols-outlined text-lg text-orange-500">tune</span>
+                                                Adjust photo colours
+                                                <span className="text-xs font-normal text-gray-400">(optional)</span>
+                                            </span>
+                                            <span className={`material-symbols-outlined text-xl text-gray-400 transition-transform ${showAdjustments ? 'rotate-180' : ''}`}>
+                                                expand_more
+                                            </span>
+                                        </button>
+                                        {showAdjustments && (
+                                            <div className="px-4 pb-4 pt-1 border-t border-gray-100 dark:border-gray-800">
+                                                <ImageAdjustments
+                                                    brightness={filters.brightness}
+                                                    contrast={filters.contrast}
+                                                    saturation={filters.saturation}
+                                                    shadow={filters.shadow}
+                                                    onBrightnessChange={(val) => setFilters(prev => ({ ...prev, brightness: val }))}
+                                                    onContrastChange={(val) => setFilters(prev => ({ ...prev, contrast: val }))}
+                                                    onSaturationChange={(val) => setFilters(prev => ({ ...prev, saturation: val }))}
+                                                    onShadowChange={(val) => setFilters(prev => ({ ...prev, shadow: val }))}
+                                                    onAutoEnhance={handleAutoEnhance}
+                                                    onResetFilters={handleResetFilters}
+                                                    hasImage={!!editor.img}
+                                                />
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                <button type="button" onClick={handleSave} disabled={showSaveProgress} className={`w-full ${primaryBtn}`}>
+                                    <span className="material-symbols-outlined text-lg">save</span>
+                                    Save Card
+                                </button>
+
+                                <div className="space-y-2">
+                                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Download or print</p>
+                                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-2 gap-2">
+                                        <button type="button" onClick={downloadPdf} className={secondaryBtn}>
+                                            <span className="material-symbols-outlined text-lg">picture_as_pdf</span>PDF
+                                        </button>
+                                        <button type="button" onClick={downloadPng} className={secondaryBtn}>
+                                            <span className="material-symbols-outlined text-lg">image</span>PNG
+                                        </button>
+                                        <button type="button" onClick={handleDownloadZip} className={secondaryBtn}>
+                                            <span className="material-symbols-outlined text-lg">folder_zip</span>ZIP
+                                        </button>
+                                        <button type="button" onClick={onPrint} className={secondaryBtn}>
+                                            <span className="material-symbols-outlined text-lg">print</span>Print
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center justify-between border-t border-gray-100 dark:border-gray-800 pt-3">
                                     <button
                                         type="button"
-                                        onClick={handleSave}
-                                        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-r from-orange-400 to-orange-600 text-white text-sm font-semibold hover:opacity-90 transition-opacity"
+                                        onClick={() => setWizardStep(1)}
+                                        className="flex items-center gap-1 h-10 px-2 -ml-2 rounded-lg text-sm font-medium text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
                                     >
-                                        <span className="material-symbols-outlined text-base">save</span>
-                                        Save Details
+                                        <span className="material-symbols-outlined text-lg">arrow_back</span>
+                                        Back
                                     </button>
-                                    <div className="grid grid-cols-3 gap-2">
-                                        {[
-                                            { label: 'PNG', action: async () => {
-                                                toast.info('Generating PNG files...');
-                                                const f = document.querySelector('.id-card-front-container') as HTMLElement;
-                                                const b = document.querySelector('.id-card-back-container') as HTMLElement;
-                                                if (!f || !b) { toast.error('Card elements not found.'); return; }
-                                                try {
-                                                    const [fc, bc] = await Promise.all([generateCardCanvas(f, true), generateCardCanvas(b, false)]);
-                                                    const dl = (c: HTMLCanvasElement, n: string) => c.toBlob((bl) => { if (bl) { const u = URL.createObjectURL(bl); const a = document.createElement('a'); a.href=u; a.download=n; a.click(); URL.revokeObjectURL(u); }}, 'image/png', 1.0);
-                                                    dl(fc, `${employee.fullName||'id'}_front.png`);
-                                                    dl(bc, `${employee.fullName||'id'}_back.png`);
-                                                    toast.success('PNG downloaded!');
-                                                } catch { toast.error('PNG generation failed.'); }
-                                            }},
-                                            { label: 'PDF', action: async () => {
-                                                toast.info('Generating PDF...');
-                                                const f = document.querySelector('.id-card-front-container') as HTMLElement;
-                                                const b = document.querySelector('.id-card-back-container') as HTMLElement;
-                                                if (!f || !b) { toast.error('Card elements not found.'); return; }
-                                                try {
-                                                    const [fc, bc] = await Promise.all([generateCardCanvas(f, true), generateCardCanvas(b, false)]);
-                                                    const { jsPDF } = await import('jspdf');
-                                                    const pdf = new jsPDF({ orientation: 'portrait', unit: 'cm', format: [5.3, 8.5] });
-                                                    pdf.addImage(fc.toDataURL('image/png',1.0),'PNG',0,0,5.3,8.5); pdf.addPage(); pdf.addImage(bc.toDataURL('image/png',1.0),'PNG',0,0,5.3,8.5);
-                                                    pdf.save(`${employee.fullName||'id'}_cards.pdf`);
-                                                    toast.success('PDF downloaded!');
-                                                } catch { toast.error('PDF generation failed.'); }
-                                            }},
-                                            { label: 'ZIP', action: handleDownloadZip },
-                                        ].map(({ label, action }) => (
-                                            <button key={label} type="button" onClick={action}
-                                                className="py-2 rounded-xl border border-gray-200 dark:border-gray-700 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
-                                                {label}
-                                            </button>
-                                        ))}
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-2">
-                                        <button type="button" onClick={onPrint}
-                                            className="py-2 rounded-xl border border-gray-200 dark:border-gray-700 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center justify-center gap-1.5">
-                                            <span className="material-symbols-outlined text-sm">print</span>Print
+                                    <div className="flex items-center gap-1">
+                                        <button
+                                            type="button"
+                                            onClick={handleReset}
+                                            className="flex items-center gap-1 h-10 px-3 rounded-lg text-sm font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 dark:hover:text-gray-300 transition-colors"
+                                        >
+                                            <span className="material-symbols-outlined text-lg">refresh</span>
+                                            Start over
                                         </button>
-                                        <button type="button" onClick={handleReset}
-                                            className="py-2 rounded-xl border border-gray-200 dark:border-gray-700 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center justify-center gap-1.5">
-                                            <span className="material-symbols-outlined text-sm">refresh</span>Reset
+                                        <button
+                                            type="button"
+                                            onClick={() => navigate(-1)}
+                                            className="h-10 px-3 rounded-lg text-sm font-medium text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                                        >
+                                            Cancel
                                         </button>
                                     </div>
-                                    <button type="button" onClick={() => navigate(-1)}
-                                        className="w-full py-2 rounded-xl border border-red-200 dark:border-red-900/30 text-xs font-medium text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
-                                        Cancel
-                                    </button>
                                 </div>
-                                <button
-                                    type="button"
-                                    onClick={() => setWizardStep(1)}
-                                    className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-                                >
-                                    <span className="material-symbols-outlined text-sm">arrow_back</span>
-                                    Back to Photo
-                                </button>
                             </div>
                         </StepWizard>
                     </div>

@@ -25,6 +25,7 @@ interface PhotoUploadProps {
     onReset?: () => void;
     isLoadingImage?: boolean;
     enableCamera?: boolean;
+    hasPhoto?: boolean;
 }
 
 const MAX_FILE_SIZE = 104857600;
@@ -43,13 +44,16 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
     onRotateRight,
     onReset,
     isLoadingImage = false,
-    enableCamera = false
+    enableCamera = false,
+    hasPhoto,
 }) => {
     const [isDragging, setIsDragging] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
     const [showGuide, setShowGuide] = useState(false);
     const [showCamera, setShowCamera] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    const photoPresent = hasPhoto ?? !!editor?.img;
 
     const validateFile = (file: File): string | null => {
         if (!['image/jpeg', 'image/png'].includes(file.type)) {
@@ -70,11 +74,8 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
 
         setIsProcessing(true);
         try {
-            const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2);
-
             await onPhotoSelect(file);
             onHideUploadNote?.();
-            onShowModal?.('success', 'File accepted', `File (${fileSizeMB}MB) accepted and ready for processing.`);
         } catch (err) {
             const errorMsg = err instanceof Error ? err.message : String(err);
             if (!errorMsg.includes('Upload') && !errorMsg.includes('Cloudinary')) {
@@ -110,6 +111,7 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
     const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file) {
+            setShowCamera(false);
             handleFile(file);
         }
         e.target.value = '';
@@ -137,97 +139,105 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
 
     const busy = isProcessing || isLoadingImage;
 
+    const tileBase =
+        'relative flex flex-col items-center justify-center gap-1 min-h-[96px] md:min-h-[104px] rounded-xl border-2 px-3 py-3 text-center transition-all select-none disabled:opacity-50 disabled:cursor-not-allowed';
+
     return (
         <div className="space-y-3">
-            {!editor?.img && (
-                <div className="flex items-center justify-between">
-                    <label className="block text-muted-foreground text-sm">
-                        Photo (upload)
-                    </label>
-                    <button
-                        type="button"
-                        onClick={() => setShowGuide(true)}
-                        className="flex items-center gap-1 text-xs text-orange-500 hover:text-orange-600 transition-colors"
-                        title="Photo guidelines"
-                    >
-                        <Info size={14} />
-                        <span>Guidelines</span>
-                    </button>
+            <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Employee photo</span>
+                <button
+                    type="button"
+                    onClick={() => setShowGuide(true)}
+                    className="flex items-center gap-1 h-8 px-2 -mr-2 rounded-lg text-xs text-orange-500 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-colors"
+                    title="Photo guidelines"
+                >
+                    <Info size={14} />
+                    <span>Guidelines</span>
+                </button>
+            </div>
+
+            {photoPresent && !busy && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-green-50 dark:bg-green-900/15 border border-green-100 dark:border-green-900/30">
+                    <span className="material-symbols-outlined text-lg text-green-500">check_circle</span>
+                    <span className="text-sm text-green-700 dark:text-green-400">Photo added. Drag it on the card to position.</span>
                 </div>
             )}
 
-            <div
-                onDrop={handleDrop}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onClick={() => !busy && fileInputRef.current?.click()}
-                className={`relative flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-5 transition-all cursor-pointer select-none ${
-                    isDragging
-                        ? 'border-primary bg-primary/5 scale-[1.01]'
-                        : 'border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500'
-                } ${busy ? 'pointer-events-none opacity-60' : ''}`}
-            >
-                <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/png,image/jpeg"
-                    onChange={handleFileInput}
-                    disabled={busy}
-                    className="hidden"
-                />
+            <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg"
+                onChange={handleFileInput}
+                disabled={busy}
+                className="hidden"
+            />
 
-                {busy ? (
-                    <div className="flex items-center gap-2.5 py-1">
-                        <div className="animate-spin">
-                            <svg className="w-5 h-5 text-primary" fill="none" viewBox="0 0 24 24">
-                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                            </svg>
-                        </div>
-                        <span className="text-sm text-muted-foreground">Processing image...</span>
+            {busy ? (
+                <div className="flex items-center justify-center gap-2.5 min-h-[96px] rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700">
+                    <div className="animate-spin">
+                        <svg className="w-5 h-5 text-primary" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
                     </div>
-                ) : isDragging ? (
-                    <div className="text-center py-2">
-                        <span className="material-symbols-outlined text-3xl text-primary">cloud_upload</span>
-                        <p className="text-sm font-medium text-primary mt-1">Drop photo here</p>
-                    </div>
-                ) : editor?.img ? (
-                    <div className="flex items-center gap-2 py-1">
-                        <span className="material-symbols-outlined text-xl text-green-500">check_circle</span>
-                        <span className="text-sm text-muted-foreground">Photo uploaded</span>
-                        <span className="text-xs text-primary font-medium ml-auto">Change</span>
-                    </div>
-                ) : (
-                    <div className="text-center py-2">
-                        <span className="material-symbols-outlined text-3xl text-gray-400">cloud_upload</span>
-                        <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mt-1">Drag & drop photo here, or click to browse</p>
-                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">JPEG / PNG Â· Max {MAX_FILE_SIZE_MB} MB</p>
-                    </div>
-                )}
-            </div>
-
-            {enableCamera && (
-                <>
-                    <div className="flex items-center gap-2 text-xs text-gray-400">
-                        <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
-                        <span>or</span>
-                        <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
-                    </div>
+                    <span className="text-sm text-muted-foreground">Processing photo...</span>
+                </div>
+            ) : (
+                <div
+                    onDrop={handleDrop}
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    className={`relative grid gap-2.5 ${enableCamera ? 'grid-cols-2' : 'grid-cols-1'}`}
+                >
                     <button
                         type="button"
-                        onClick={() => setShowCamera(true)}
-                        disabled={busy}
-                        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        onClick={() => fileInputRef.current?.click()}
+                        className={`${tileBase} border-dashed ${
+                            isDragging
+                                ? 'border-primary bg-primary/5'
+                                : 'border-gray-300 dark:border-gray-600 hover:border-orange-400 hover:bg-orange-50/50 dark:hover:bg-orange-900/10'
+                        }`}
                     >
-                        <span className="material-symbols-outlined text-lg">photo_camera</span>
-                        Take Photo with Camera
+                        <span className="material-symbols-outlined text-3xl text-orange-500">
+                            {isDragging ? 'download' : 'upload'}
+                        </span>
+                        <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
+                            {isDragging ? 'Drop photo here' : photoPresent ? 'Upload new' : 'Upload photo'}
+                        </span>
+                        <span className="text-[11px] text-gray-400 dark:text-gray-500">
+                            JPEG / PNG<span className="hidden lg:inline"> · or drag &amp; drop</span>
+                        </span>
                     </button>
-                    <LiveCameraCapture
-                        isOpen={showCamera}
-                        onClose={() => setShowCamera(false)}
-                        onCapture={handleFile}
-                    />
-                </>
+
+                    {enableCamera && (
+                        <button
+                            type="button"
+                            onClick={() => setShowCamera((v) => !v)}
+                            className={`${tileBase} ${
+                                showCamera
+                                    ? 'border-orange-500 bg-orange-50 dark:bg-orange-900/20'
+                                    : 'border-gray-300 dark:border-gray-600 hover:border-orange-400 hover:bg-orange-50/50 dark:hover:bg-orange-900/10'
+                            }`}
+                        >
+                            <span className="material-symbols-outlined text-3xl text-orange-500">photo_camera</span>
+                            <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
+                                {photoPresent ? 'Retake photo' : 'Take photo'}
+                            </span>
+                            <span className="text-[11px] text-gray-400 dark:text-gray-500">
+                                {showCamera ? 'Camera is open below' : 'Front or back camera'}
+                            </span>
+                        </button>
+                    )}
+                </div>
+            )}
+
+            {enableCamera && (
+                <LiveCameraCapture
+                    isOpen={showCamera && !busy}
+                    onClose={() => setShowCamera(false)}
+                    onCapture={handleFile}
+                />
             )}
 
             {editor?.img && (
@@ -241,7 +251,7 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
                                 title="Zoom In"
                                 className="flex-1 px-2 py-2 text-xs font-medium bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded transition-colors"
                             >
-                                ðŸ”+
+                                🔍+
                             </button>
                             <button
                                 onClick={onZoomOut}
@@ -249,25 +259,25 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
                                 title="Zoom Out"
                                 className="flex-1 px-2 py-2 text-xs font-medium bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded transition-colors"
                             >
-                                ðŸ”âˆ’
+                                🔍−
                             </button>
                         </div>
                         <div className="flex gap-1">
                             <button
                                 onClick={onRotateLeft}
                                 disabled={!editor.img}
-                                title="Rotate Left (15Â°)"
+                                title="Rotate Left (15°)"
                                 className="flex-1 px-2 py-2 text-xs font-medium bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded transition-colors"
                             >
-                                â†¶
+                                ↶
                             </button>
                             <button
                                 onClick={onRotateRight}
                                 disabled={!editor.img}
-                                title="Rotate Right (15Â°)"
+                                title="Rotate Right (15°)"
                                 className="flex-1 px-2 py-2 text-xs font-medium bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded transition-colors"
                             >
-                                â†·
+                                ↷
                             </button>
                         </div>
                     </div>
@@ -280,7 +290,7 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
                         Reset Position
                     </button>
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                        Scale: {editor.scale.toFixed(2)}x | Rotation: {Math.round((editor.rotation * 180) / Math.PI)}Â°
+                        Scale: {editor.scale.toFixed(2)}x | Rotation: {Math.round((editor.rotation * 180) / Math.PI)}°
                     </p>
                 </div>
             )}
