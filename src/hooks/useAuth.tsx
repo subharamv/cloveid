@@ -280,7 +280,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             let sessionError = null;
 
             try {
-                const { data, error } = await supabase.auth.getSession();
+                // getSession() refreshes an expired token over the network; don't let an
+                // unreachable server keep the app on the loading screen.
+                const { data, error } = await Promise.race([
+                    supabase.auth.getSession(),
+                    new Promise<never>((_, reject) =>
+                        setTimeout(() => reject(new Error('getSession timed out after 15s')), 15000)
+                    ),
+                ]);
                 supabaseSession = data?.session ?? null;
                 sessionError = error ?? null;
                 console.log('getSession resolved:', { hasSession: !!supabaseSession, hasError: !!sessionError });

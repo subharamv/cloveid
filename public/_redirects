@@ -1,1 +1,4 @@
+# Same-origin fallback route to Supabase for networks where HTTP/3 (QUIC) to supabase.co fails
+/sb-proxy/*    https://tmygylckkbocgunlubik.supabase.co/:splat    200
+
 /*    /index.html   200

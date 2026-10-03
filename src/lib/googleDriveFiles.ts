@@ -1,6 +1,6 @@
 import { supabase } from './supabaseClient';
 
-const SUPABASE_URL = 'https://tmygylckkbocgunlubik.supabase.co';
+import { SUPABASE_URL, supabaseFetch } from '@/lib/supabaseFetch';
 const SUPABASE_ANON_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRteWd5bGNra2JvY2d1bmx1YmlrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYwNTEyODAsImV4cCI6MjA4MTYyNzI4MH0.SYo3IcVUBGfHs1PZGgP8wtPhvmtQQ6ytW9_H7NW20SE';
 
@@ -28,7 +28,7 @@ export async function listDriveFiles(folderId?: string): Promise<DriveListResult
   const token = session?.access_token ?? SUPABASE_ANON_KEY;
 
   const params = folderId ? `?folderId=${encodeURIComponent(folderId)}` : '';
-  const response = await fetch(`${SUPABASE_URL}/functions/v1/list-drive-files${params}`, {
+  const response = await supabaseFetch(`${SUPABASE_URL}/functions/v1/list-drive-files${params}`, {
     headers: {
       apikey: SUPABASE_ANON_KEY,
       Authorization: `Bearer ${token}`,
@@ -44,7 +44,7 @@ export async function searchDriveFiles(query: string): Promise<DriveFile[]> {
   const { data: { session } } = await supabase.auth.getSession();
   const token = session?.access_token ?? SUPABASE_ANON_KEY;
 
-  const response = await fetch(
+  const response = await supabaseFetch(
     `${SUPABASE_URL}/functions/v1/list-drive-files?search=${encodeURIComponent(query)}`,
     {
       headers: {
@@ -66,12 +66,12 @@ export async function searchDriveFiles(query: string): Promise<DriveFile[]> {
  */
 export async function fetchDriveFile(url: string): Promise<Response> {
   const fileId = extractDriveFileId(url);
-  if (!fileId) return fetch(url);
+  if (!fileId) return supabaseFetch(url);
 
   const { data: { session } } = await supabase.auth.getSession();
   const token = session?.access_token ?? SUPABASE_ANON_KEY;
 
-  return fetch(
+  return supabaseFetch(
     `${SUPABASE_URL}/functions/v1/proxy-download?fileId=${encodeURIComponent(fileId)}`,
     {
       headers: {
@@ -116,7 +116,7 @@ export async function uploadPhotoToDrive(
   form.append('type', 'processed_photo');
   form.append('employeeId', employeeId);
 
-  const response = await fetch(`${SUPABASE_URL}/functions/v1/upload-to-drive`, {
+  const response = await supabaseFetch(`${SUPABASE_URL}/functions/v1/upload-to-drive`, {
     method: 'POST',
     headers: {
       apikey: SUPABASE_ANON_KEY,
@@ -136,7 +136,7 @@ export async function deleteDriveFile(fileId: string): Promise<void> {
   const { data: { session } } = await supabase.auth.getSession();
   const token = session?.access_token ?? SUPABASE_ANON_KEY;
 
-  const response = await fetch(
+  const response = await supabaseFetch(
     `${SUPABASE_URL}/functions/v1/list-drive-files?fileId=${encodeURIComponent(fileId)}`,
     {
       method: 'DELETE',

@@ -3,11 +3,24 @@ import react from "@vitejs/plugin-react-swc";
 import { VitePWA } from "vite-plugin-pwa";
 import path from "path";
 
+// Mirrors the Netlify /sb-proxy rewrite (public/_redirects) for dev and preview.
+const sbProxy = {
+  "/sb-proxy": {
+    target: "https://tmygylckkbocgunlubik.supabase.co",
+    changeOrigin: true,
+    rewrite: (p: string) => p.replace(/^\/sb-proxy/, ""),
+  },
+};
+
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
     port: 8080,
+    proxy: sbProxy,
+  },
+  preview: {
+    proxy: sbProxy,
   },
   plugins: [
     react(),
@@ -37,7 +50,7 @@ export default defineConfig(({ mode }) => ({
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
         maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
         navigateFallback: "/index.html",
-        navigateFallbackDenylist: [/^\/functions\//, /^\/auth\//, /^\/rest\//],
+        navigateFallbackDenylist: [/^\/sb-proxy\//],
         cleanupOutdatedCaches: true,
         clientsClaim: true,
         skipWaiting: true,

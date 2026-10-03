@@ -54,14 +54,15 @@ const Login: React.FC = () => {
         }
     }, [session, userRole, isActive, loading, navigate]);
 
-  // GSAP right panel entrance
+  // GSAP right panel entrance (panel isn't mounted while auth is loading)
   useEffect(() => {
+    if (loading || !rightPanelRef.current) return;
     gsap.fromTo(
       rightPanelRef.current,
       { opacity: 0, x: 60 },
       { opacity: 1, x: 0, duration: 0.7, ease: 'power3.out' }
     );
-  }, []);
+  }, [loading]);
 
   const animateFormSwitch = (cb: () => void) => {
     gsap.to(formContainerRef.current, {
