@@ -59,6 +59,29 @@ export async function searchDriveFiles(query: string): Promise<DriveFile[]> {
   return (data as DriveListResult).files;
 }
 
+/**
+ * Fetch a Google Drive file through our server-side proxy edge function, which
+ * bypasses the CORS block that prevents browser fetch() from directly downloading
+ * Drive files.  Falls back to a plain fetch for non-Drive URLs.
+ */
+export async function fetchDriveFile(url: string): Promise<Response> {
+  const fileId = extractDriveFileId(url);
+  if (!fileId) return fetch(url);
+
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token ?? SUPABASE_ANON_KEY;
+
+  return fetch(
+    `${SUPABASE_URL}/functions/v1/proxy-download?fileId=${encodeURIComponent(fileId)}`,
+    {
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  );
+}
+
 /** Extract a Drive file ID from a download URL or view URL. Returns null if not a Drive URL. */
 export function extractDriveFileId(url: string | null | undefined): string | null {
   if (!url) return null;
@@ -73,6 +96,40 @@ export function extractDriveFileId(url: string | null | undefined): string | nul
   } catch {
     return null;
   }
+}
+
+/**
+ * Upload a photo blob to Google Drive via the upload-to-drive edge function.
+ * Returns the Drive download URL (https://drive.google.com/uc?id=...) for storage in the DB.
+ */
+export async function uploadPhotoToDrive(
+  blob: Blob,
+  fileName: string,
+  employeeId: string,
+): Promise<string> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token ?? SUPABASE_ANON_KEY;
+
+  const form = new FormData();
+  form.append('file', blob, fileName);
+  form.append('fileName', fileName);
+  form.append('type', 'processed_photo');
+  form.append('employeeId', employeeId);
+
+  const response = await fetch(`${SUPABASE_URL}/functions/v1/upload-to-drive`, {
+    method: 'POST',
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${token}`,
+    },
+    body: form,
+  });
+
+  const data = await response.json();
+  if (!response.ok || !data.downloadUrl) {
+    throw new Error(data.error || 'Failed to upload photo to Drive');
+  }
+  return data.downloadUrl as string;
 }
 
 export async function deleteDriveFile(fileId: string): Promise<void> {

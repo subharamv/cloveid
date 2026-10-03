@@ -7,6 +7,7 @@ import LandingPanel from '@/components/auth/LandingPanel';
 import LoginForm from '@/components/auth/LoginForm';
 import RegisterForm from '@/components/auth/RegisterForm';
 import ForgotPasswordForm from '@/components/auth/ForgotPasswordForm';
+import { hardResetApp } from '@/lib/pwa';
 
 const Login: React.FC = () => {
   const navigate = useNavigate();
@@ -22,12 +23,7 @@ const Login: React.FC = () => {
   const authStuckRef = useRef<HTMLDivElement>(null);
 
   const clearSiteData = () => {
-    localStorage.clear();
-    sessionStorage.clear();
-    document.cookie.split(';').forEach((c) => {
-      document.cookie = c.replace(/^ +/, '').replace(/=.*/, '=;expires=' + new Date().toUTCString() + ';path=/');
-    });
-    window.location.reload();
+    hardResetApp();
   };
 
     useEffect(() => {

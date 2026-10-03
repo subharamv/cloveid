@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '@/lib/supabaseClient';
-import { deleteDriveFile, extractDriveFileId } from '@/lib/googleDriveFiles';
+import { deleteDriveFile, extractDriveFileId, fetchDriveFile } from '@/lib/googleDriveFiles';
 import AppHeader from '../components/AppHeader';
 import { toast } from 'sonner';
 import {
@@ -11,7 +11,8 @@ import {
 } from 'lucide-react';
 import ViewRequestModal from '../components/ViewRequestModal';
 import { HiddenCardRenderer } from '../components/HiddenCardRenderer';
-import { imageToDataUrl } from '@/lib/utils';
+import { imageToDataUrl, cloudinaryThumbnail } from '@/lib/utils';
+import { useStorageProvider } from '@/hooks/useStorageProvider';
 import cloveLogo from '@/assets/CLOVE LOGO BLACK.png';
 import backLogoSvg from '@/assets/logo svg.png';
 import html2canvas from 'html2canvas';
@@ -19,13 +20,20 @@ import JSZip from 'jszip';
 
 const PAGE_SIZES = [10, 20, 50];
 
+type CardDownloadStatus = 'waiting' | 'fetching' | 'extracting' | 'done' | 'failed' | 'no_zip';
+interface CardProgress { cardId: string; name: string; status: CardDownloadStatus; }
+
 const BatchManagement = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { uploadImage } = useStorageProvider();
 
   const [batches, setBatches] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get('q') || '';
+  });
   const [statusFilter, setStatusFilter] = useState(() => {
     const params = new URLSearchParams(location.search);
     return params.get('status') || 'all';
@@ -59,6 +67,10 @@ const BatchManagement = () => {
   const [processingCard, setProcessingCard] = useState<any | null>(null);
   const [pendingBatchId, setPendingBatchId] = useState<string | null>(null);
 
+  // Bulk download progress
+  const [dlProgress, setDlProgress] = useState<CardProgress[]>([]);
+  const [dlOverall, setDlOverall] = useState<'idle' | 'processing' | 'zipping' | 'ready'>('idle');
+
   useEffect(() => {
     const loadLogos = async () => {
       try {
@@ -75,6 +87,8 @@ const BatchManagement = () => {
     const params = new URLSearchParams(location.search);
     const s = params.get('status');
     if (s) setStatusFilter(s);
+    const q = params.get('q');
+    if (q) setSearchQuery(q);
   }, [location.search]);
 
   useEffect(() => { fetchBatches(); }, []);
@@ -101,6 +115,13 @@ const BatchManagement = () => {
       setExpandedBatchIds(new Set());
       return;
     }
+    // Card data is fetched lazily per batch, so a fresh search needs to pull in
+    // any batch's cards that haven't been loaded yet before it can match on them.
+    batches.forEach(b => {
+      if (!batchCards[b.batch_id] && !batchCardsLoading[b.batch_id]) {
+        fetchBatchCards(b.batch_id);
+      }
+    });
     const q = searchQuery.toLowerCase();
     batches.forEach(b => {
       const cards = batchCards[b.batch_id];
@@ -112,10 +133,12 @@ const BatchManagement = () => {
       );
       if (hasMatch) {
         setExpandedBatchIds(prev => { if (prev.has(b.batch_id)) return prev; const next = new Set(prev); next.add(b.batch_id); return next; });
-        setCardSearchQueries(prev => { if (prev[b.batch_id]) return prev; return { ...prev, [b.batch_id]: searchQuery }; });
+        // Keep the per-batch search box mirroring the live top-level query as the user keeps typing,
+        // instead of freezing at whatever value first produced a match.
+        setCardSearchQueries(prev => { if (prev[b.batch_id] === searchQuery) return prev; return { ...prev, [b.batch_id]: searchQuery }; });
       }
     });
-  }, [searchQuery, batchCards]);
+  }, [searchQuery, batchCards, batches]);
 
   const fetchVendors = async () => {
     const { data, error } = await supabase.from('vendors').select('id,name');
@@ -397,24 +420,66 @@ const BatchManagement = () => {
     const sel = getSelected(batchId);
     if (sel.size === 0) { toast.error('No cards selected'); return; }
     const cards = (batchCards[batchId] || []).filter(c => sel.has(String(c.card_id)));
+
+    // Initialise per-card progress
+    setDlProgress(cards.map(c => ({ cardId: String(c.card_id), name: c.name || c.employee_id || String(c.card_id), status: 'waiting' as const })));
+    setDlOverall('processing');
+
+    const setCardStatus = (cardId: string, status: CardDownloadStatus) =>
+      setDlProgress(prev => prev.map(p => p.cardId === cardId ? { ...p, status } : p));
+
     const master = new JSZip();
     let hasFiles = false;
+
     for (const card of cards) {
-      if (card.zip_url) {
-        try {
-          const resp = await fetch(card.zip_url);
-          if (!resp.ok) continue;
-          const blob = await resp.blob();
-          const inner = await new JSZip().loadAsync(blob);
-          inner.forEach((path, file) => {
-            if (!file.dir) master.file(`${card.name}/${path}`, file.async('blob'));
-          });
-          hasFiles = true;
-        } catch { toast.error(`Failed to fetch ZIP for ${card.name}`); }
+      const cid = String(card.card_id);
+      if (!card.zip_url) { setCardStatus(cid, 'no_zip'); continue; }
+
+      // Build a clean folder name: "John_Doe_CLOVE-1234"
+      const safeName = (card.name || 'Employee').replace(/[^a-z0-9]/gi, '_');
+      const rawId = String(card.employee_id || '').replace(/^CLOVE[-_]?/i, '').trim();
+      const safeId = rawId ? `CLOVE-${rawId}` : String(card.card_id);
+      const folderName = `${safeName}_${safeId}`;
+
+      setCardStatus(cid, 'fetching');
+      try {
+        const resp = await fetchDriveFile(card.zip_url);
+        if (!resp.ok) { setCardStatus(cid, 'failed'); continue; }
+        setCardStatus(cid, 'extracting');
+        const blob = await resp.blob();
+        const inner = await new JSZip().loadAsync(blob);
+        // Extract only files (skip dirs), place each in the person's named folder
+        const entries: Promise<void>[] = [];
+        inner.forEach((path, file) => {
+          if (!file.dir) {
+            const fileName = path.includes('/') ? path.split('/').pop()! : path;
+            entries.push(
+              file.async('blob').then(b => { master.file(`${folderName}/${fileName}`, b); })
+            );
+          }
+        });
+        await Promise.all(entries);
+        hasFiles = true;
+        setCardStatus(cid, 'done');
+      } catch {
+        setCardStatus(cid, 'failed');
       }
     }
-    if (!hasFiles) { toast.error('No ZIP files available for selected cards'); return; }
-    const blob = await master.generateAsync({ type: 'blob' });
+
+    if (!hasFiles) {
+      toast.error('No ZIP files available for selected cards');
+      setDlOverall('idle');
+      return;
+    }
+
+    setDlOverall('zipping');
+    // Yield to browser so the 'zipping' state paints before the CPU-heavy generateAsync blocks the thread
+    await new Promise(r => setTimeout(r, 50));
+    const blob = await master.generateAsync(
+      { type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } },
+    );
+    setDlOverall('ready');
+
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `Batch_${batchId}_Cards.zip`;
@@ -457,15 +522,13 @@ const BatchManagement = () => {
           try {
             const fc = await html2canvas(el.querySelector('.id-card-front') as HTMLElement, { scale: 12, useCORS: true, allowTaint: true });
             const bc = await html2canvas(el.querySelector('.id-card-back') as HTMLElement, { scale: 12, useCORS: true, allowTaint: true });
-            const upload = async (path: string, dataUrl: string) => {
+            const upload = async (fileName: string, path: string, dataUrl: string) => {
               const blob = await (await fetch(dataUrl)).blob();
-              const { error } = await supabase.storage.from('id-card-images').upload(path, blob, { upsert: true });
-              if (error) throw error;
-              return supabase.storage.from('id-card-images').getPublicUrl(path).data.publicUrl;
+              return uploadImage(blob, fileName, path);
             };
             [front_image_url, back_image_url] = await Promise.all([
-              upload(`public/batch-${pendingBatchId}-${card.card_id}-front.png`, fc.toDataURL('image/png')),
-              upload(`public/batch-${pendingBatchId}-${card.card_id}-back.png`, bc.toDataURL('image/png')),
+              upload(`batch-${pendingBatchId}-${card.card_id}-front.png`, `public/batch-${pendingBatchId}-${card.card_id}-front.png`, fc.toDataURL('image/png')),
+              upload(`batch-${pendingBatchId}-${card.card_id}-back.png`, `public/batch-${pendingBatchId}-${card.card_id}-back.png`, bc.toDataURL('image/png')),
             ]);
           } catch (e) { console.error('Image generation error:', e); }
         }
@@ -806,7 +869,7 @@ const BatchManagement = () => {
                                             <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">{card.branch}</td>
                                             <td className="px-4 py-3">
                                               {photo ? (
-                                                <img src={photo} alt="" className="w-9 h-9 rounded-full border border-gray-200 dark:border-gray-600 object-cover" onError={e => e.currentTarget.classList.add('hidden')} />
+                                                <img src={cloudinaryThumbnail(photo, 72)} alt="" className="w-9 h-9 rounded-full border border-gray-200 dark:border-gray-600 object-cover" onError={e => e.currentTarget.classList.add('hidden')} />
                                               ) : (
                                                 <div className="w-9 h-9 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-xs text-gray-500">-</div>
                                               )}
@@ -966,6 +1029,85 @@ const BatchManagement = () => {
                   {isDownloading ? 'Sending...' : 'Send'}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Download Progress Modal */}
+      {dlOverall !== 'idle' && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+            {/* Header */}
+            <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+              <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                {dlOverall === 'processing' && 'Collecting cards…'}
+                {dlOverall === 'zipping' && 'Creating ZIP archive…'}
+                {dlOverall === 'ready' && 'Download started!'}
+              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                {dlProgress.filter(p => p.status === 'done').length} / {dlProgress.length} card{dlProgress.length !== 1 ? 's' : ''} ready
+              </p>
+            </div>
+
+            {/* Per-card list */}
+            <ul className="max-h-64 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700">
+              {dlProgress.map(p => {
+                const statusMeta: Record<string, { label: string; color: string; spin?: boolean }> = {
+                  waiting:    { label: 'Waiting',    color: 'text-gray-400' },
+                  fetching:   { label: 'Fetching…',  color: 'text-blue-500',    spin: true },
+                  extracting: { label: 'Extracting…',color: 'text-amber-500',   spin: true },
+                  done:       { label: 'Ready',      color: 'text-emerald-600' },
+                  failed:     { label: 'Failed',     color: 'text-red-500' },
+                  no_zip:     { label: 'No ZIP',     color: 'text-gray-400' },
+                };
+                const meta = statusMeta[p.status];
+                return (
+                  <li key={p.cardId} className="flex items-center justify-between px-5 py-2.5 gap-3">
+                    <span className="text-sm text-gray-700 dark:text-gray-300 truncate flex-1">{p.name}</span>
+                    <span className={`flex items-center gap-1 text-xs font-medium shrink-0 ${meta.color}`}>
+                      {meta.spin && <Loader2 size={11} className="animate-spin" />}
+                      {p.status === 'done' && <CheckCircle2 size={11} />}
+                      {p.status === 'failed' && <AlertCircle size={11} />}
+                      {meta.label}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+
+            {/* Overall progress bar */}
+            <div className="px-5 py-3 border-t border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30">
+              {dlOverall === 'zipping' && (
+                <div className="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400 mb-2">
+                  <Loader2 size={12} className="animate-spin" /> Compressing into ZIP…
+                </div>
+              )}
+              {dlOverall === 'ready' && (
+                <div className="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400 mb-2">
+                  <Download size={12} /> ZIP ready — download starting
+                </div>
+              )}
+              <div className="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-300 ${dlOverall === 'ready' ? 'bg-emerald-500' : 'bg-orange-500'}`}
+                  style={{
+                    width: dlOverall === 'zipping' || dlOverall === 'ready'
+                      ? '100%'
+                      : `${Math.round((dlProgress.filter(p => ['done','failed','no_zip'].includes(p.status)).length / Math.max(dlProgress.length, 1)) * 100)}%`
+                  }}
+                />
+              </div>
+              {dlOverall === 'ready' && (
+                <div className="flex justify-end mt-3">
+                  <button
+                    onClick={() => setDlOverall('idle')}
+                    className="px-4 py-1.5 rounded-xl bg-gray-900 dark:bg-white text-white dark:text-gray-900 text-xs font-medium hover:opacity-80 transition-opacity"
+                  >
+                    Close
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>

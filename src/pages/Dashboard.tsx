@@ -79,6 +79,70 @@ const Dashboard = () => {
     const FETCH_DEBOUNCE_MS = 3000;
     const isFetching = useRef(false);
 
+    // Universal search (single + bulk cards by name/ID)
+    const [universalQuery, setUniversalQuery] = useState('');
+    const [universalResults, setUniversalResults] = useState<{
+        single: any[];
+        bulk: any[];
+    }>({ single: [], bulk: [] });
+    const [universalSearching, setUniversalSearching] = useState(false);
+    const [showUniversalResults, setShowUniversalResults] = useState(false);
+    const universalSearchRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const term = universalQuery.trim();
+        if (!term) {
+            setUniversalResults({ single: [], bulk: [] });
+            setUniversalSearching(false);
+            return;
+        }
+        setUniversalSearching(true);
+        const handle = setTimeout(async () => {
+            try {
+                const [{ data: singleData }, { data: bulkData }] = await Promise.all([
+                    supabase
+                        .from('card_details')
+                        .select('id, full_name, employee_id, branch')
+                        .or(`full_name.ilike.%${term}%,employee_id.ilike.%${term}%`)
+                        .limit(5),
+                    supabase
+                        .from('employee_card_details')
+                        .select('card_id, batch_id, name, employee_id, branch')
+                        .or(`name.ilike.%${term}%,employee_id.ilike.%${term}%`)
+                        .limit(5),
+                ]);
+                setUniversalResults({ single: singleData || [], bulk: bulkData || [] });
+            } catch (err) {
+                console.error('Universal search failed:', err);
+            } finally {
+                setUniversalSearching(false);
+            }
+        }, 300);
+        return () => clearTimeout(handle);
+    }, [universalQuery]);
+
+    useEffect(() => {
+        const onClickOutside = (e: MouseEvent) => {
+            if (universalSearchRef.current && !universalSearchRef.current.contains(e.target as Node)) {
+                setShowUniversalResults(false);
+            }
+        };
+        document.addEventListener('mousedown', onClickOutside);
+        return () => document.removeEventListener('mousedown', onClickOutside);
+    }, []);
+
+    const goToSingleCardResult = (term: string) => {
+        setShowUniversalResults(false);
+        setUniversalQuery('');
+        navigate(`/single-card-tracking?q=${encodeURIComponent(term)}`);
+    };
+
+    const goToBulkCardResult = (term: string) => {
+        setShowUniversalResults(false);
+        setUniversalQuery('');
+        navigate(`/batches?q=${encodeURIComponent(term)}`);
+    };
+
     const shouldFetch = (): boolean => {
         const now = Date.now();
         if (now - lastFetchTime.current > FETCH_DEBOUNCE_MS) {
@@ -410,6 +474,67 @@ const Dashboard = () => {
                             </p>
                         </div>
                         <div className="flex items-center gap-2">
+                            <div className="relative w-full sm:w-64" ref={universalSearchRef}>
+                                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                                <input
+                                    type="text"
+                                    placeholder="Search by name or ID..."
+                                    value={universalQuery}
+                                    onChange={(e) => { setUniversalQuery(e.target.value); setShowUniversalResults(true); }}
+                                    onFocus={() => setShowUniversalResults(true)}
+                                    className="w-full pl-9 pr-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm text-gray-900 dark:text-white placeholder:text-gray-400 focus:ring-2 focus:ring-orange-500/20 focus:border-orange-400 outline-none transition-all"
+                                />
+                                {showUniversalResults && universalQuery.trim() && (
+                                    <div className="absolute z-30 mt-1 w-full max-h-80 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg">
+                                        {universalSearching ? (
+                                            <div className="flex items-center justify-center py-4">
+                                                <Loader2 size={16} className="animate-spin text-orange-500" />
+                                            </div>
+                                        ) : universalResults.single.length === 0 && universalResults.bulk.length === 0 ? (
+                                            <p className="px-4 py-3 text-xs text-gray-400">No cards found.</p>
+                                        ) : (
+                                            <>
+                                                {universalResults.single.length > 0 && (
+                                                    <div>
+                                                        <p className="px-3 pt-2.5 pb-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Single Cards</p>
+                                                        {universalResults.single.map((c) => (
+                                                            <button
+                                                                key={`single-${c.id}`}
+                                                                onClick={() => goToSingleCardResult(c.employee_id || c.full_name)}
+                                                                className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                                                            >
+                                                                <span className="min-w-0">
+                                                                    <span className="block text-sm font-medium text-gray-900 dark:text-white truncate">{c.full_name}</span>
+                                                                    <span className="block text-xs text-gray-400">{c.employee_id}{c.branch ? ` · ${c.branch}` : ''}</span>
+                                                                </span>
+                                                                <ChevronRight size={14} className="text-gray-300 shrink-0" />
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                                {universalResults.bulk.length > 0 && (
+                                                    <div>
+                                                        <p className="px-3 pt-2.5 pb-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Bulk Cards</p>
+                                                        {universalResults.bulk.map((c) => (
+                                                            <button
+                                                                key={`bulk-${c.card_id}`}
+                                                                onClick={() => goToBulkCardResult(c.employee_id || c.name)}
+                                                                className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                                                            >
+                                                                <span className="min-w-0">
+                                                                    <span className="block text-sm font-medium text-gray-900 dark:text-white truncate">{c.name}</span>
+                                                                    <span className="block text-xs text-gray-400">{c.employee_id}{c.branch ? ` · ${c.branch}` : ''}</span>
+                                                                </span>
+                                                                <ChevronRight size={14} className="text-gray-300 shrink-0" />
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
                             <button
                                 onClick={() => { if (shouldFetch()) { refetchStats(); fetchDashboardData(); } }}
                                 className="flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"

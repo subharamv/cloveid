@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { deleteDriveFile, extractDriveFileId } from '@/lib/googleDriveFiles';
 import { HiddenCardRenderer } from '../components/HiddenCardRenderer';
 import { useDownloadZip } from '../hooks/useDownloadZip';
+import { useStorageProvider } from '@/hooks/useStorageProvider';
 import { imageToDataUrl } from '@/lib/utils';
 import cloveLogo from '@/assets/CLOVE LOGO BLACK.png';
 import backLogoSvg from '@/assets/logo svg.png';
@@ -42,6 +43,7 @@ const ManageRequests = () => {
     const navigate = useNavigate();
     const location = useLocation();
     const { branches } = useBranches();
+    const { uploadImage: uploadPreviewImage } = useStorageProvider();
     const [selectedRequests, setSelectedRequests] = useState<number[]>([]);
     const [viewingRequest, setViewingRequest] = useState<Request | null>(null);
     const [requests, setRequests] = useState<Request[]>([]);
@@ -408,20 +410,23 @@ const ManageRequests = () => {
                     const frontImage = frontCanvas.toDataURL('image/png');
                     const backImage = backCanvas.toDataURL('image/png');
 
-                    const frontImagePath = `public/${request.id}-${request.employeeId}-front.png`;
-                    const backImagePath = `public/${request.id}-${request.employeeId}-back.png`;
+                    const frontFileName = `${request.id}-${request.employeeId}-front.png`;
+                    const backFileName = `${request.id}-${request.employeeId}-back.png`;
+                    const frontImagePath = `public/${frontFileName}`;
+                    const backImagePath = `public/${backFileName}`;
 
-                    const uploadImage = async (path: string, dataUrl: string) => {
+                    const uploadPreview = async (fileName: string, path: string, dataUrl: string) => {
                         const blob = await (await fetch(dataUrl)).blob();
-                        const { data, error } = await supabase.storage.from('id-card-images').upload(path, blob, { upsert: true });
-                        if (error) { console.error('Upload error:', error); throw error; }
-                        return supabase.storage.from('id-card-images').getPublicUrl(path).data.publicUrl;
+                        return uploadPreviewImage(blob, fileName, path);
                     };
 
                     let front_image_url = '';
                     let back_image_url = '';
                     try {
-                        [front_image_url, back_image_url] = await Promise.all([uploadImage(frontImagePath, frontImage), uploadImage(backImagePath, backImage)]);
+                        [front_image_url, back_image_url] = await Promise.all([
+                            uploadPreview(frontFileName, frontImagePath, frontImage),
+                            uploadPreview(backFileName, backImagePath, backImage),
+                        ]);
                     } catch (uploadErr) {
                         console.error('Storage upload failed, using local generation fallback in dashboard', uploadErr);
                     }

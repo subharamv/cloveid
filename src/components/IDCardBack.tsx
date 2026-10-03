@@ -9,10 +9,17 @@ interface IDCardBackProps {
   logoSrc?: string;
 }
 
+const formatEmpId = (id: string | undefined): string => {
+  if (!id) return '—';
+  const numeric = String(id).replace(/^CLOVE[-_]?/i, '').trim();
+  if (/^\d+$/.test(numeric)) return `CLOVE-${numeric}`;
+  return id;
+};
+
 export const IDCardBack = React.forwardRef<HTMLDivElement, IDCardBackProps>(({ employee, logoSrc: propLogoSrc }, ref) => {
   const { branding } = useBranding();
   const { branches } = useBranches();
-  
+
   const branchInfo = branches.find(b => b.name.toLowerCase() === (employee.branch || '').toLowerCase());
 
   const emergencyContactDisplay = employee.countryCode && employee.emergencyContact
@@ -40,7 +47,7 @@ export const IDCardBack = React.forwardRef<HTMLDivElement, IDCardBackProps>(({ e
           <div className="grid grid-cols-[92px_16px_1fr] items-center">
             <div className="font-bold">Emp ID</div>
             <div className="text-left px-1">:</div>
-            <div>{employee.employeeId || '—'}</div>
+            <div>{formatEmpId(employee.employeeId)}</div>
           </div>
           <div className="grid grid-cols-[92px_16px_1fr] items-center">
             <div className="font-bold">Blood Group</div>

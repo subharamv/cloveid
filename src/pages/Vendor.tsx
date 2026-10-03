@@ -15,6 +15,7 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { cloudinaryThumbnail } from '@/lib/utils';
 
 const PAGE_SIZES = [10, 20, 50];
 
@@ -855,7 +856,7 @@ const VendorManagement = () => {
                                                 <div className="flex gap-4">
                                                     {request.card_details.photo && (
                                                         <img
-                                                            src={request.card_details.photo}
+                                                            src={cloudinaryThumbnail(request.card_details.photo, 128)}
                                                             alt=""
                                                             className="w-16 h-20 object-cover rounded-lg border border-gray-200 dark:border-gray-700 shrink-0"
                                                             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
@@ -932,7 +933,7 @@ const VendorManagement = () => {
                                         <div className="flex gap-3">
                                             {request.card_details.photo && (
                                                 <img
-                                                    src={request.card_details.photo}
+                                                    src={cloudinaryThumbnail(request.card_details.photo, 96)}
                                                     alt=""
                                                     className="w-12 h-16 object-cover rounded-lg border border-gray-200 dark:border-gray-700 shrink-0"
                                                     onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}

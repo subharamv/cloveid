@@ -1,6 +1,7 @@
 import React from 'react';
 import { Employee } from '@/types/employee';
 import { useBranding } from '@/hooks/useBranding';
+import { stripCloudinaryBackgroundRemoval } from '@/lib/utils';
 import cloveLogoDefault from '@/assets/CLOVE LOGO BLACK.png';
 
 interface IDCardFrontProps {
@@ -105,6 +106,15 @@ export const IDCardFront = React.forwardRef<HTMLDivElement, IDCardFrontProps>(({
                             alt={employee.fullName}
                             className="w-full h-full object-cover"
                             crossOrigin="anonymous"
+                            onError={(e) => {
+                                const img = e.currentTarget;
+                                if (img.dataset.bgFallback) return;
+                                const stripped = stripCloudinaryBackgroundRemoval(img.src);
+                                if (stripped !== img.src) {
+                                    img.dataset.bgFallback = '1';
+                                    img.src = stripped;
+                                }
+                            }}
                         />
                     )
                 )}

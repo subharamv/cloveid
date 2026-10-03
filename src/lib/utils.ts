@@ -5,6 +5,58 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+// Injects Cloudinary's f_auto/q_auto delivery optimizations plus a width cap
+// so small thumbnails don't pull the full 1000px-wide upload over the wire.
+export function cloudinaryThumbnail(url: string, width: number): string {
+  if (!url || !url.includes('res.cloudinary.com') || !url.includes('/image/upload/')) return url;
+  return url.replace('/image/upload/', `/image/upload/f_auto,q_auto,w_${width},c_fill/`);
+}
+
+// Some stored photo_urls were generated with Cloudinary's AI background-removal
+// add-on baked into the URL. If that add-on later becomes unavailable/unauthorized
+// on the account, those URLs 401 forever — this strips the effect so callers can
+// retry with a plain delivery URL.
+export function stripCloudinaryBackgroundRemoval(url: string): string {
+  if (!url || !url.includes('res.cloudinary.com') || !url.includes('/image/upload/')) return url;
+  const [prefix, rest] = url.split('/image/upload/');
+  const segments = rest
+    .split('/')
+    .map(seg => seg.split(',').filter(p => p !== 'e_background_removal' && p !== 'e_bgremoval').join(','))
+    .filter(seg => seg.length > 0);
+  return `${prefix}/image/upload/${segments.join('/')}`;
+}
+
+// Uploads the composed card canvas (crop/zoom/rotation/filters already baked in
+// by drawEditor) so photo_url reflects exactly what the user arranged in the
+// editor, instead of the raw pre-edit Cloudinary image.
+export async function uploadCanvasToCloudinary(canvas: HTMLCanvasElement): Promise<string> {
+  const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
+  const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
+  if (!cloudName || !uploadPreset) {
+    throw new Error('Missing Cloudinary configuration');
+  }
+
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Failed to export canvas'))), 'image/png', 1.0);
+  });
+
+  const formData = new FormData();
+  formData.append('file', blob);
+  formData.append('upload_preset', uploadPreset);
+
+  const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
+    method: 'POST',
+    body: formData,
+  });
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data?.error?.message ?? `Upload failed with status ${response.status}`);
+  }
+
+  return data.secure_url as string;
+}
+
 export async function imageToDataUrl(imagePath: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();

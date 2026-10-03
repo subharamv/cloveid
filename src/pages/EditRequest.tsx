@@ -322,6 +322,8 @@ const EditRequest: React.FC = () => {
             const oc = offscreen.getContext('2d');
             if (!oc) return;
 
+            oc.imageSmoothingEnabled = true;
+            oc.imageSmoothingQuality = 'high';
             oc.fillStyle = '#fff';
             oc.fillRect(0, 0, offscreen.width, offscreen.height);
             oc.save();
@@ -353,6 +355,8 @@ const EditRequest: React.FC = () => {
             oc.restore();
 
             // finally draw the offscreen to the visible canvas (scaled to rect)
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
             ctx.drawImage(offscreen, 0, 0, rect.width, rect.height);
         } catch (e) {
             console.error('drawEditor error', e);
@@ -513,6 +517,8 @@ const EditRequest: React.FC = () => {
         const oc = offscreen.getContext('2d');
         if (!oc) throw new Error('Could not get canvas context');
 
+        oc.imageSmoothingEnabled = true;
+        oc.imageSmoothingQuality = 'high';
         // Fill white background
         oc.fillStyle = '#fff';
         oc.fillRect(0, 0, offscreen.width, offscreen.height);

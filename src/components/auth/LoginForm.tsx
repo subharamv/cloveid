@@ -2,6 +2,18 @@ import { useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
 import { Eye, EyeOff, Loader2, AlertCircle } from 'lucide-react';
+import { clearStoredAuth, hardResetApp } from '@/lib/pwa';
+
+const NETWORK_ERROR_RE = /failed to fetch|load failed|networkerror|network request failed|fetch failed/i;
+
+const isNetworkError = (err: unknown) => {
+  if (!err) return false;
+  const e = err as { name?: string; message?: string };
+  return e.name === 'AuthRetryableFetchError' || NETWORK_ERROR_RE.test(e.message || '');
+};
+
+const NETWORK_ERROR_MESSAGE =
+  'Unable to reach the server. Check your internet connection. If the problem continues, tap "Reset app & reload" below to clear this device\'s cached data.';
 
 interface LoginFormProps {
   onForgotPassword: () => void;
@@ -15,17 +27,40 @@ export default function LoginForm({ onForgotPassword }: LoginFormProps) {
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
+  const [showReset, setShowReset] = useState(false);
+
+  const signIn = () => supabase.auth.signInWithPassword({ email: email.trim(), password });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     setError('');
+    setShowReset(false);
+
+    if (!navigator.onLine) {
+      setError('You appear to be offline. Connect to the internet and try again.');
+      setIsSubmitting(false);
+      return;
+    }
 
     try {
-      const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      });
+      let { data: loginData, error: loginError } = await signIn();
+
+      // A stale/corrupt persisted session can make the auth client fail at the
+      // network layer on some devices. Drop it and retry once with a clean slate.
+      if (loginError && isNetworkError(loginError)) {
+        console.warn('Login network error, clearing stored auth and retrying:', loginError);
+        clearStoredAuth();
+        await new Promise((r) => setTimeout(r, 800));
+        ({ data: loginData, error: loginError } = await signIn());
+      }
+
+      if (loginError && isNetworkError(loginError)) {
+        setError(NETWORK_ERROR_MESSAGE);
+        setShowReset(true);
+        setIsSubmitting(false);
+        return;
+      }
 
       if (loginError) {
         const msg = loginError.message;
@@ -82,6 +117,14 @@ export default function LoginForm({ onForgotPassword }: LoginFormProps) {
 
       const { data: profile, error: profileError } = await fetchProfileWithTimeout();
 
+      if (profileError && (isNetworkError(profileError) || profileError?.name === 'AbortError')) {
+        setError(NETWORK_ERROR_MESSAGE);
+        setShowReset(true);
+        await supabase.auth.signOut({ scope: 'local' });
+        setIsSubmitting(false);
+        return;
+      }
+
       if (profileError || !profile) {
         setError('Your account is not fully set up. Please contact HR for assistance.');
         localStorage.removeItem('auth_cache');
@@ -102,7 +145,12 @@ export default function LoginForm({ onForgotPassword }: LoginFormProps) {
         return;
       }
     } catch (err: any) {
-      setError(err.message || 'A connection error occurred.');
+      if (isNetworkError(err)) {
+        setError(NETWORK_ERROR_MESSAGE);
+        setShowReset(true);
+      } else {
+        setError(err.message || 'A connection error occurred.');
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -151,7 +199,18 @@ export default function LoginForm({ onForgotPassword }: LoginFormProps) {
       {error && (
         <div className="mx-4 mt-3 flex items-start gap-2 p-3 rounded-lg bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-800/20">
           <AlertCircle size={16} className="text-red-500 mt-0.5 shrink-0" />
-          <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+          <div className="flex flex-col gap-2">
+            <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+            {showReset && (
+              <button
+                type="button"
+                onClick={() => hardResetApp()}
+                className="self-start text-sm font-bold text-red-700 dark:text-red-300 underline hover:no-underline"
+              >
+                Reset app &amp; reload
+              </button>
+            )}
+          </div>
         </div>
       )}
 

@@ -12,7 +12,8 @@ import cloveLogo from '@/assets/CLOVE LOGO BLACK.png';
 import backLogoSvg from '@/assets/logo svg.png';
 import html2canvas from 'html2canvas';
 import JSZip from 'jszip';
-import { deleteDriveFile, extractDriveFileId } from '@/lib/googleDriveFiles';
+import { deleteDriveFile, extractDriveFileId, fetchDriveFile } from '@/lib/googleDriveFiles';
+import { useStorageProvider } from '@/hooks/useStorageProvider';
 
 const PAGE_SIZES = [10, 20, 50];
 
@@ -45,9 +46,13 @@ const getDisplayStatus = (card: any) => {
 const SingleCardTracking = () => {
     const navigate = useNavigate();
     const location = useLocation();
+    const { uploadImage: uploadPreviewImage } = useStorageProvider();
     const [cards, setCards] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
-    const [searchQuery, setSearchQuery] = useState('');
+    const [searchQuery, setSearchQuery] = useState(() => {
+        const params = new URLSearchParams(location.search);
+        return params.get('q') || '';
+    });
     const [statusFilter, setStatusFilter] = useState(() => {
         const params = new URLSearchParams(location.search);
         return params.get('status') || 'all';
@@ -71,6 +76,8 @@ const SingleCardTracking = () => {
         const params = new URLSearchParams(location.search);
         const status = params.get('status');
         if (status) setStatusFilter(status);
+        const q = params.get('q');
+        if (q) setSearchQuery(q);
     }, [location.search]);
 
     useEffect(() => {
@@ -222,6 +229,14 @@ const SingleCardTracking = () => {
         setSelectedRows(new Set());
     };
 
+    const fetchZipBlob = async (url: string): Promise<Blob | null> => {
+        const resp = await fetchDriveFile(url);
+        if (!resp.ok) return null;
+        const contentType = resp.headers.get('content-type') || '';
+        if (contentType.includes('text/html')) return null;
+        return resp.blob();
+    };
+
     const handleBulkDownload = async () => {
         if (selectedRows.size === 0) return;
         const cardsToDownload = cards.filter(c => selectedRows.has(c.id) && c.zip_url);
@@ -230,9 +245,8 @@ const SingleCardTracking = () => {
         let hasFiles = false;
         for (const card of cardsToDownload) {
             try {
-                const resp = await fetch(card.zip_url);
-                if (!resp.ok) continue;
-                const blob = await resp.blob();
+                const blob = await fetchZipBlob(card.zip_url);
+                if (!blob) continue;
                 const inner = await new JSZip().loadAsync(blob);
                 inner.forEach((path, file) => {
                     if (!file.dir) master.file(`${(card.full_name || 'card').replace(/ /g, '_')}/${path}`, file.async('blob'));
@@ -310,27 +324,39 @@ const SingleCardTracking = () => {
             try {
                 const cardElement = document.getElementById(`id-card-${card.id}`);
                 if (cardElement) {
-                    const frontCanvas = await html2canvas(cardElement.querySelector('.id-card-front') as HTMLElement, { scale: 12 });
-                    const backCanvas = await html2canvas(cardElement.querySelector('.id-card-back') as HTMLElement, { scale: 12 });
+                    const frontCanvas = await html2canvas(cardElement.querySelector('.id-card-front') as HTMLElement, {
+                        scale: 12,
+                        useCORS: true,
+                        allowTaint: true,
+                        backgroundColor: '#ffffff',
+                        imageTimeout: 15000,
+                    });
+                    const backCanvas = await html2canvas(cardElement.querySelector('.id-card-back') as HTMLElement, {
+                        scale: 12,
+                        useCORS: true,
+                        allowTaint: true,
+                        backgroundColor: '#ffffff',
+                        imageTimeout: 15000,
+                    });
                     const frontImage = frontCanvas.toDataURL('image/png');
                     const backImage = backCanvas.toDataURL('image/png');
 
-                    const frontImagePath = `public/${card.id}-${card.employee_id}-front.png`;
-                    const backImagePath = `public/${card.id}-${card.employee_id}-back.png`;
+                    const frontFileName = `${card.id}-${card.employee_id}-front.png`;
+                    const backFileName = `${card.id}-${card.employee_id}-back.png`;
+                    const frontImagePath = `public/${frontFileName}`;
+                    const backImagePath = `public/${backFileName}`;
 
-                    const uploadImage = async (path: string, dataUrl: string) => {
+                    const uploadPreview = async (fileName: string, path: string, dataUrl: string) => {
                         const blob = await (await fetch(dataUrl)).blob();
-                        const { error } = await supabase.storage.from('id-card-images').upload(path, blob, { upsert: true });
-                        if (error) throw error;
-                        return supabase.storage.from('id-card-images').getPublicUrl(path).data.publicUrl;
+                        return uploadPreviewImage(blob, fileName, path);
                     };
 
                     let front_image_url = '';
                     let back_image_url = '';
                     try {
                         [front_image_url, back_image_url] = await Promise.all([
-                            uploadImage(frontImagePath, frontImage),
-                            uploadImage(backImagePath, backImage),
+                            uploadPreview(frontFileName, frontImagePath, frontImage),
+                            uploadPreview(backFileName, backImagePath, backImage),
                         ]);
                     } catch (uploadErr) {
                         console.error('Storage upload failed:', uploadErr);

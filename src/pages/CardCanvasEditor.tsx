@@ -810,7 +810,7 @@ const CardCanvasEditor: React.FC = () => {
   };
 
   const branchInfo = branches[0];
-  const sampleEmployee = { fullName: 'Yuva Subharam V', employeeId: 'CLOVE-2980', bloodGroup: 'O+', emergencyContact: '+91 94934 75556', photoUrl: 'https://res.cloudinary.com/dmoha80me/image/upload/v1778233161/pbrhz6fqut2t7k1q94tg.png' };
+  const sampleEmployee = { fullName: 'Yuva Subharam V', employeeId: 'CLOVE-2980', bloodGroup: 'O+', emergencyContact: '+91 94934 75556', photoUrl: `https://res.cloudinary.com/${import.meta.env.VITE_CLOUDINARY_CLOUD_NAME}/image/upload/v1778233161/pbrhz6fqut2t7k1q94tg.png` };
 
   const renderCardElement = (element: CardLayoutElement, side: 'front' | 'back') => {
     const position = side === 'front' ? element.front_position : element.back_position;

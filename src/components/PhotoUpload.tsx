@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { Info } from 'lucide-react';
 import PhotoGuideModal from '@/components/PhotoGuideModal';
+import LiveCameraCapture from '@/components/LiveCameraCapture';
 
 interface EditorState {
     img: HTMLImageElement | null;
@@ -23,6 +24,7 @@ interface PhotoUploadProps {
     onRotateRight?: () => void;
     onReset?: () => void;
     isLoadingImage?: boolean;
+    enableCamera?: boolean;
 }
 
 const MAX_FILE_SIZE = 104857600;
@@ -40,11 +42,13 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
     onRotateLeft,
     onRotateRight,
     onReset,
-    isLoadingImage = false
+    isLoadingImage = false,
+    enableCamera = false
 }) => {
     const [isDragging, setIsDragging] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
     const [showGuide, setShowGuide] = useState(false);
+    const [showCamera, setShowCamera] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const validateFile = (file: File): string | null => {
@@ -197,11 +201,34 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
                     <div className="text-center py-2">
                         <span className="material-symbols-outlined text-3xl text-gray-400">cloud_upload</span>
                         <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mt-1">Drag & drop photo here, or click to browse</p>
-                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">JPEG / PNG · Max {MAX_FILE_SIZE_MB} MB</p>
+                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">JPEG / PNG Â· Max {MAX_FILE_SIZE_MB} MB</p>
                     </div>
                 )}
             </div>
 
+            {enableCamera && (
+                <>
+                    <div className="flex items-center gap-2 text-xs text-gray-400">
+                        <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
+                        <span>or</span>
+                        <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => setShowCamera(true)}
+                        disabled={busy}
+                        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                        <span className="material-symbols-outlined text-lg">photo_camera</span>
+                        Take Photo with Camera
+                    </button>
+                    <LiveCameraCapture
+                        isOpen={showCamera}
+                        onClose={() => setShowCamera(false)}
+                        onCapture={handleFile}
+                    />
+                </>
+            )}
 
             {editor?.img && (
                 <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
@@ -214,7 +241,7 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
                                 title="Zoom In"
                                 className="flex-1 px-2 py-2 text-xs font-medium bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded transition-colors"
                             >
-                                🔍+
+                                ðŸ”+
                             </button>
                             <button
                                 onClick={onZoomOut}
@@ -222,25 +249,25 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
                                 title="Zoom Out"
                                 className="flex-1 px-2 py-2 text-xs font-medium bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded transition-colors"
                             >
-                                🔍−
+                                ðŸ”âˆ’
                             </button>
                         </div>
                         <div className="flex gap-1">
                             <button
                                 onClick={onRotateLeft}
                                 disabled={!editor.img}
-                                title="Rotate Left (15°)"
+                                title="Rotate Left (15Â°)"
                                 className="flex-1 px-2 py-2 text-xs font-medium bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded transition-colors"
                             >
-                                ↶
+                                â†¶
                             </button>
                             <button
                                 onClick={onRotateRight}
                                 disabled={!editor.img}
-                                title="Rotate Right (15°)"
+                                title="Rotate Right (15Â°)"
                                 className="flex-1 px-2 py-2 text-xs font-medium bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded transition-colors"
                             >
-                                ↷
+                                â†·
                             </button>
                         </div>
                     </div>
@@ -253,7 +280,7 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
                         Reset Position
                     </button>
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                        Scale: {editor.scale.toFixed(2)}x | Rotation: {Math.round((editor.rotation * 180) / Math.PI)}°
+                        Scale: {editor.scale.toFixed(2)}x | Rotation: {Math.round((editor.rotation * 180) / Math.PI)}Â°
                     </p>
                 </div>
             )}

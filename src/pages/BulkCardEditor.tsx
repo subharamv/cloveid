@@ -21,7 +21,7 @@ import { scale } from "@cloudinary/url-gen/actions/resize";
 import { quality, format } from "@cloudinary/url-gen/actions/delivery";
 import { auto } from "@cloudinary/url-gen/qualifiers/quality";
 import { auto as autoFormat } from "@cloudinary/url-gen/qualifiers/format";
-import { imageToDataUrl, compressImage } from '@/lib/utils';
+import { imageToDataUrl, compressImage, uploadCanvasToCloudinary } from '@/lib/utils';
 import AppHeader from '../components/AppHeader';
 import { supabase } from '@/lib/supabaseClient';
 import { ProgressBar } from '@/components/ProgressBar';
@@ -321,6 +321,12 @@ const BulkCardEditor: React.FC = () => {
                 }
             });
 
+            // Normalize employee ID to CLOVE-{number} format
+            if (newEmployee.employeeId) {
+                const raw = String(newEmployee.employeeId).replace(/^CLOVE[-_]?/i, '').trim();
+                newEmployee.employeeId = /^\d+$/.test(raw) ? `CLOVE-${raw}` : newEmployee.employeeId;
+            }
+
             setEmployee(prev => ({ ...prev, ...newEmployee }));
 
             if (imageUrl) {
@@ -375,10 +381,11 @@ const BulkCardEditor: React.FC = () => {
     // track last object URL to revoke it later
     const lastObjectUrlRef = useRef<string | null>(null);
 
-    // target export size in pixels (1200 DPI for maximum quality)
-    const TARGET_W_PX = Math.round(2.125 * 1200); // width in px
-    // Maintain aspect ratio of the photo box (230x276) to prevent distortion
-    const TARGET_H_PX = Math.round(TARGET_W_PX * (276 / 230));
+    // Match html2canvas scale 12: card is 230px CSS wide × 12 = 2760px rendered.
+    // Photo canvas at this size means no upscaling inside html2canvas — max photo quality.
+    const TARGET_W_PX = 230 * 12; // 2760px ≈ 1300 DPI for a 2.125" card
+    // Maintain aspect ratio of the photo box (230×276)
+    const TARGET_H_PX = Math.round(TARGET_W_PX * (276 / 230)); // 3312px
 
     const handleShowModal = useCallback((type: 'error' | 'success', title: string, message: string) => {
         setModal({ isOpen: true, type, title, message });
@@ -630,6 +637,8 @@ const BulkCardEditor: React.FC = () => {
             const oc = offscreen.getContext('2d');
             if (!oc) return;
 
+            oc.imageSmoothingEnabled = true;
+            oc.imageSmoothingQuality = 'high';
             oc.fillStyle = '#fff';
             oc.fillRect(0, 0, offscreen.width, offscreen.height);
             oc.save();
@@ -661,6 +670,8 @@ const BulkCardEditor: React.FC = () => {
             oc.restore();
 
             // finally draw the offscreen to the visible canvas (scaled to rect)
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
             ctx.drawImage(offscreen, 0, 0, rect.width, rect.height);
             console.log('✓ Image drawn to canvas successfully');
         } catch (e) {
@@ -789,13 +800,20 @@ const BulkCardEditor: React.FC = () => {
         try {
             const canvas = canvasRef.current;
             let updatedEmployee = { ...employee };
+            let composedPhotoUrl: string | null = null;
 
             setSaveProgress(10);
             setSaveMessage('Generating card images...');
-            if (canvas) {
+            if (canvas && editor.img) {
                 drawEditor();
                 const photoDataUrl = canvas.toDataURL('image/png', 1.0);
                 updatedEmployee.photo = photoDataUrl;
+                setSaveMessage('Uploading positioned photo...');
+                try {
+                    composedPhotoUrl = await uploadCanvasToCloudinary(canvas);
+                } catch (err) {
+                    console.warn('Failed to upload composed photo, falling back to raw photo URL:', err);
+                }
             }
 
             setSaveProgress(30);
@@ -807,7 +825,7 @@ const BulkCardEditor: React.FC = () => {
             const zipFileName = `${employee.fullName.replace(/ /g, '_')}_${employee.employeeId}_ID_Card.zip`;
             const finalZipUrl = await uploadZip(blob, zipFileName, 'batch', batchId || undefined);
 
-            const safeFotoUrl = photoUrl && !photoUrl.includes('image/fetch/') ? photoUrl : null;
+            const safeFotoUrl = composedPhotoUrl || (photoUrl && !photoUrl.includes('image/fetch/') ? photoUrl : null);
             updatedEmployee.photo_url = safeFotoUrl;
             updatedEmployee.zip_url = finalZipUrl;
 
@@ -846,6 +864,24 @@ const BulkCardEditor: React.FC = () => {
                 if (dbError) {
                     console.error('Error updating id_cards:', dbError);
                     toast.error('Failed to update database record, but ZIP was saved.');
+                }
+
+                // Sync employees table so employee_card_details view stays accurate
+                const { data: cardRow } = await supabase
+                    .from('id_cards')
+                    .select('employee_id')
+                    .eq('id', cardId)
+                    .single();
+                if (cardRow?.employee_id) {
+                    await supabase
+                        .from('employees')
+                        .update({
+                            branch: employee.branch || undefined,
+                            blood_group: employee.bloodGroup || undefined,
+                            emergency_contact: employee.emergencyContact || undefined,
+                            ...(employee.countryCode ? { country_code: employee.countryCode } : {}),
+                        })
+                        .eq('id', cardRow.employee_id);
                 }
             }
 

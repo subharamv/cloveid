@@ -49,6 +49,8 @@ export const useDownloadZip = () => {
           offscreen.height = dimensions.h;
           const oc = offscreen.getContext('2d');
           if (oc) {
+            oc.imageSmoothingEnabled = true;
+            oc.imageSmoothingQuality = 'high';
             oc.fillStyle = '#fff';
             oc.fillRect(0, 0, offscreen.width, offscreen.height);
             oc.save();
@@ -72,6 +74,7 @@ export const useDownloadZip = () => {
             }
             oc.drawImage(editor.img, dx, dy, editor.img.width, editor.img.height);
             oc.restore();
+            // Keep the intermediate photo lossless — JPEG encoding happens once at the final output stage
             highResDataUrl = offscreen.toDataURL('image/png');
           }
         } catch (e) {
@@ -80,14 +83,16 @@ export const useDownloadZip = () => {
         }
       }
 
+      const CAPTURE_SCALE = 12;
+
       // 2. Capture the front card
       const frontCanvas = await html2canvas(frontCard, {
         backgroundColor: '#ffffff',
-        scale: 12, // Increased scale for ~1200 DPI
+        scale: CAPTURE_SCALE,
         useCORS: true,
         allowTaint: true,
         logging: false,
-        imageTimeout: 15000, // Increased timeout
+        imageTimeout: 15000,
         onclone: (clonedDoc) => {
           if (highResDataUrl) {
             const canvasEl = clonedDoc.querySelector('canvas');
@@ -115,11 +120,11 @@ export const useDownloadZip = () => {
       // 3. Capture the back card
       const backCanvas = await html2canvas(backCard, {
         backgroundColor: '#ffffff',
-        scale: 12, // Increased scale for ~1200 DPI
+        scale: CAPTURE_SCALE,
         useCORS: true,
         allowTaint: true,
         logging: false,
-        imageTimeout: 15000, // Increased timeout
+        imageTimeout: 15000,
         onclone: (clonedDoc) => {
           if (backLogoDataUrl) {
             const logoImgs = clonedDoc.querySelectorAll('img[alt*="Clove"]');
@@ -131,44 +136,44 @@ export const useDownloadZip = () => {
         },
       });
 
-      // 4. Generate PDF with high-quality settings
+      // 4. Generate PDF — lossless PNG per page, no addImage re-compression
       const { jsPDF } = await import('jspdf');
       const pdf = new jsPDF({
         orientation: 'portrait',
         unit: 'in',
-        format: [2.125, 3.375], // Standard ID-1 size in inches
-        compress: false, // Disable compression for maximum quality
+        format: [2.125, 3.375],
+        compress: true,
       });
 
       const frontImgData = frontCanvas.toDataURL('image/png');
-      const backImgData = backCanvas.toDataURL('image/png');
+      const backImgData  = backCanvas.toDataURL('image/png');
 
-      pdf.addImage(frontImgData, 'PNG', 0, 0, 2.125, 3.375, undefined, 'FAST');
+      pdf.addImage(frontImgData, 'PNG', 0, 0, 2.125, 3.375, undefined, 'NONE');
       pdf.addPage();
-      pdf.addImage(backImgData, 'PNG', 0, 0, 2.125, 3.375, undefined, 'FAST');
+      pdf.addImage(backImgData, 'PNG', 0, 0, 2.125, 3.375, undefined, 'NONE');
       const pdfBlob = pdf.output('blob');
 
-      // 5. Convert canvases to blobs
+      // 5. Convert canvases to lossless PNG blobs for max photo quality
       const frontBlob = await new Promise<Blob>((resolve, reject) => {
-        frontCanvas.toBlob((blob) => {
-          if (blob) resolve(blob);
-          else reject(new Error('Failed to create front card blob'));
-        }, 'image/png');
+        frontCanvas.toBlob(
+          (blob) => { if (blob) resolve(blob); else reject(new Error('Failed to create front card blob')); },
+          'image/png',
+        );
       });
 
       const backBlob = await new Promise<Blob>((resolve, reject) => {
-        backCanvas.toBlob((blob) => {
-          if (blob) resolve(blob);
-          else reject(new Error('Failed to create back card blob'));
-        }, 'image/png');
+        backCanvas.toBlob(
+          (blob) => { if (blob) resolve(blob); else reject(new Error('Failed to create back card blob')); },
+          'image/png',
+        );
       });
 
-      // 6. Create a zip file
+      // 6. Create a zip file — DEFLATE compresses PNG and PDF structure well
       const zip = new JSZip();
       const safeName = (employee.fullName || 'employee').replace(/[^a-z0-9]/gi, '_');
-      zip.file(`${safeName}_ID_Card.pdf`, pdfBlob);
-      zip.file(`${safeName}_Front.png`, frontBlob);
-      zip.file(`${safeName}_Back.png`, backBlob);
+      zip.file(`${safeName}_ID_Card.pdf`, pdfBlob, { compression: 'DEFLATE', compressionOptions: { level: 6 } });
+      zip.file(`${safeName}_Front.png`, frontBlob, { compression: 'DEFLATE', compressionOptions: { level: 6 } });
+      zip.file(`${safeName}_Back.png`,  backBlob,  { compression: 'DEFLATE', compressionOptions: { level: 6 } });
 
 
       // 7. Generate and return the zip blob

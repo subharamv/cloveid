@@ -24,7 +24,7 @@ import { quality, format } from "@cloudinary/url-gen/actions/delivery";
 import { auto } from "@cloudinary/url-gen/qualifiers/quality";
 import { auto as autoFormat } from "@cloudinary/url-gen/qualifiers/format";
 
-import { imageToDataUrl, compressImage } from '@/lib/utils';
+import { imageToDataUrl, compressImage, uploadCanvasToCloudinary } from '@/lib/utils';
 
 import '@/styles/EmployeePage.css';
 const EmployeePage: React.FC = () => {
@@ -258,6 +258,8 @@ const EmployeePage: React.FC = () => {
             const oc = offscreen.getContext('2d');
             if (!oc) return;
 
+            oc.imageSmoothingEnabled = true;
+            oc.imageSmoothingQuality = 'high';
             oc.fillStyle = '#fff';
             oc.fillRect(0, 0, offscreen.width, offscreen.height);
             oc.save();
@@ -280,6 +282,8 @@ const EmployeePage: React.FC = () => {
             oc.restore();
 
             // finally draw the offscreen to the visible canvas (scaled to rect)
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
             ctx.drawImage(offscreen, 0, 0, rect.width, rect.height);
         } catch (e) {
             console.error('drawEditor error', e);
@@ -458,6 +462,8 @@ const EmployeePage: React.FC = () => {
                         const oc = offscreen.getContext('2d');
                         if (!oc) return;
 
+                        oc.imageSmoothingEnabled = true;
+                        oc.imageSmoothingQuality = 'high';
                         oc.fillStyle = '#fff';
                         oc.fillRect(0, 0, offscreen.width, offscreen.height);
                         oc.save();
@@ -477,7 +483,11 @@ const EmployeePage: React.FC = () => {
                         canvasEl.width = TARGET_W_PX;
                         canvasEl.height = TARGET_H_PX;
                         const ctx = canvasEl.getContext('2d');
-                        ctx?.drawImage(offscreen, 0, 0, TARGET_W_PX, TARGET_H_PX);
+                        if (ctx) {
+                            ctx.imageSmoothingEnabled = true;
+                            ctx.imageSmoothingQuality = 'high';
+                            ctx.drawImage(offscreen, 0, 0, TARGET_W_PX, TARGET_H_PX);
+                        }
                     },
                 }).then(resolve).catch(reject);
             });
@@ -530,6 +540,18 @@ const EmployeePage: React.FC = () => {
                 return;
             }
 
+            // Upload the composed canvas (crop/zoom/rotation already applied)
+            // so photo_url matches exactly what's shown in the editor.
+            let composedPhotoUrl: string | null = null;
+            if (canvasRef.current && editor.img) {
+                drawEditor();
+                try {
+                    composedPhotoUrl = await uploadCanvasToCloudinary(canvasRef.current);
+                } catch (err) {
+                    console.warn('Failed to upload composed photo, falling back to raw photo URL:', err);
+                }
+            }
+
             const { error } = await supabase.from('requests').insert({
                 user_id: effectiveUserId,
                 full_name: employee.fullName,
@@ -538,7 +560,7 @@ const EmployeePage: React.FC = () => {
                 blood_group: employee.bloodGroup,
                 emergency_contact: employee.emergencyContact,
                 country_code: employee.countryCode,
-                photo_url: photoUrl,
+                photo_url: composedPhotoUrl || photoUrl,
                 status: 'Pending',
                 is_edited: false
             });

@@ -9,16 +9,21 @@ import { HiddenCardRenderer } from '../components/HiddenCardRenderer';
 import { IDCardFront } from '../components/IDCardFront';
 import { IDCardBack } from '../components/IDCardBack';
 import { imageToDataUrl } from '@/lib/utils';
+import { useStorageProvider } from '@/hooks/useStorageProvider';
 import cloveLogo from '@/assets/CLOVE LOGO BLACK.png';
 import backLogoSvg from '@/assets/logo svg.png';
-import { deleteDriveFile, extractDriveFileId } from '@/lib/googleDriveFiles';
+import { deleteDriveFile, extractDriveFileId, fetchDriveFile, uploadPhotoToDrive } from '@/lib/googleDriveFiles';
 import {
-    Box, ChevronLeft, Search, Loader2, Trash2, Download, Send, Eye, Edit3, X, CheckCircle2, Columns3,
+    Box, ChevronLeft, Search, Loader2, Trash2, Download, Send, Eye, Edit3, X, CheckCircle2, Columns3, AlertCircle,
 } from 'lucide-react';
+
+type CardDownloadStatus = 'waiting' | 'fetching' | 'extracting' | 'done' | 'failed' | 'no_zip';
+interface CardProgress { cardId: string; name: string; status: CardDownloadStatus; }
 
 const ImportManagement = () => {
     const location = useLocation();
     const navigate = useNavigate();
+    const { uploadZip, uploadImage } = useStorageProvider();
     const { initialCsvData = [], headers: initialHeaders = [] } = location.state || {};
     const [csvData, setCsvData] = useState(initialCsvData);
     const [headers, setHeaders] = useState<string[]>(initialHeaders);
@@ -37,6 +42,8 @@ const ImportManagement = () => {
     const [frontLogoDataUrl, setFrontLogoDataUrl] = useState<string>('');
     const [backLogoDataUrl, setBackLogoDataUrl] = useState<string>('');
     const [isDownloading, setIsDownloading] = useState(false);
+    const [dlProgress, setDlProgress] = useState<CardProgress[]>([]);
+    const [dlOverall, setDlOverall] = useState<'idle' | 'processing' | 'zipping' | 'ready'>('idle');
     const [deletedCardIds, setDeletedCardIds] = useState<number[]>([]);
     const [cardPhotoUrls, setCardPhotoUrls] = useState<Record<number, string>>(location.state?.cardPhotoUrls || {});
     const [cardViewEmployee, setCardViewEmployee] = useState<any>(null);
@@ -123,7 +130,9 @@ const ImportManagement = () => {
                     const loadedCardPhotoUrls: Record<number, string> = {};
                     cards.forEach((card, idx) => {
                         loadedCardIds[idx] = card.id;
-                        if (card.card_data.zip_url) loadedZipUrls[idx] = card.card_data.zip_url;
+                        // Prefer top-level zip_url column; fall back to card_data.zip_url for older records
+                        if (card.zip_url) loadedZipUrls[idx] = card.zip_url;
+                        else if (card.card_data?.zip_url) loadedZipUrls[idx] = card.card_data.zip_url;
                         loadedPrintStatuses[idx] = card.print_status || card.status || 'pending';
                         loadedCardPhotoUrls[idx] = card.photo_url || '';
                     });
@@ -298,10 +307,15 @@ const ImportManagement = () => {
                     if (!url || (!url.startsWith('blob:') && !url.startsWith('data:'))) return url;
                     const response = await fetch(url);
                     const blob = await response.blob();
-                    const path = `bulk/${finalBatchId}/${employeeIdStr}_${prefix}.${ext}`;
-                    const { error } = await supabase.storage.from('id-card-images').upload(path, blob, { upsert: true });
-                    if (error) throw error;
-                    return supabase.storage.from('id-card-images').getPublicUrl(path).data.publicUrl;
+                    const fileName = `${employeeIdStr}_${prefix}.${ext}`;
+                    if (prefix === 'photo') {
+                        return await uploadPhotoToDrive(blob, fileName, employeeIdStr);
+                    }
+                    if (prefix === 'id_card') {
+                        return await uploadZip(blob, fileName, 'batch', finalBatchId);
+                    }
+                    const path = `bulk/${finalBatchId}/${fileName}`;
+                    return await uploadImage(blob, fileName, path);
                 };
 
                 let { data: employee } = await supabase.from('employees').select('id').eq('employee_id', employeeIdStr).maybeSingle();
@@ -349,35 +363,87 @@ const ImportManagement = () => {
         }
     };
 
+    const fetchZipBlob = async (url: string): Promise<Blob | null> => {
+        // Drive URLs are routed through our server-side proxy to bypass CORS restrictions.
+        const response = await fetchDriveFile(url);
+        if (!response.ok) return null;
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('text/html')) return null;
+        return response.blob();
+    };
+
     const handleDownloadAll = async () => {
         if (selectedRows.size === 0) { toast.error('Please select at least one row to download'); return; }
+
+        const lc = headers.map(h => String(h || '').toLowerCase().trim());
+        const fullNameIndex = lc.findIndex(h => h === 'full name' || h === 'name');
+        const idIndex = lc.findIndex(h => h === 'employee id' || h === 'id' || h === 'employeeid' || h === 'emp id');
+
+        const rowList = Array.from(selectedRows);
+        setDlProgress(rowList.map(rowIndex => {
+            const row = csvData[rowIndex];
+            const name = fullNameIndex !== -1 ? String(row?.[fullNameIndex] || `Row ${rowIndex + 1}`) : `Row ${rowIndex + 1}`;
+            return { cardId: String(rowIndex), name, status: 'waiting' as const };
+        }));
+        setDlOverall('processing');
+
+        const setCardStatus = (rowIndex: number, status: CardDownloadStatus) =>
+            setDlProgress(prev => prev.map(p => p.cardId === String(rowIndex) ? { ...p, status } : p));
+
         try {
-            const lc = headers.map(h => String(h || '').toLowerCase().trim());
-            const fullNameIndex = lc.findIndex(h => h === 'full name' || h === 'name');
             const masterZip = new JSZip();
             let hasValidZips = false;
-            for (const rowIndex of selectedRows) {
+
+            for (const rowIndex of rowList) {
                 const row = csvData[rowIndex];
                 const zipUrl = zipUrls[rowIndex];
-                const employeeName = fullNameIndex !== -1 ? row[fullNameIndex] : `employee_${rowIndex}`;
-                if (zipUrl) {
-                    try {
-                        const response = await fetch(zipUrl);
-                        if (!response.ok) continue;
-                        const blob = await response.blob();
-                        const inner = await new JSZip().loadAsync(blob);
-                        inner.forEach((path: string, file: any) => {
-                            if (!file.dir) masterZip.file(`${employeeName}/${path}`, file.async('blob'));
-                        });
-                        hasValidZips = true;
-                    } catch { toast.error(`Failed to process ZIP for ${employeeName}`); }
+                const employeeName = fullNameIndex !== -1 ? String(row[fullNameIndex] || `employee_${rowIndex}`) : `employee_${rowIndex}`;
+                const rawId = idIndex !== -1 ? String(row[idIndex] || '').replace(/^CLOVE[-_]?/i, '').trim() : '';
+                const empId = rawId ? `CLOVE-${rawId}` : String(rowIndex + 1);
+                const safeName = employeeName.replace(/[^a-z0-9]/gi, '_');
+                const folderName = `${safeName}_${empId}`;
+
+                if (!zipUrl) { setCardStatus(rowIndex, 'no_zip'); continue; }
+
+                setCardStatus(rowIndex, 'fetching');
+                try {
+                    const blob = await fetchZipBlob(zipUrl);
+                    if (!blob) { setCardStatus(rowIndex, 'failed'); continue; }
+                    setCardStatus(rowIndex, 'extracting');
+                    const inner = await new JSZip().loadAsync(blob);
+                    const entries: Promise<void>[] = [];
+                    inner.forEach((path: string, file: any) => {
+                        if (!file.dir) {
+                            const fileName = path.includes('/') ? path.split('/').pop()! : path;
+                            entries.push(
+                                file.async('blob').then((b: Blob) => { masterZip.file(`${folderName}/${fileName}`, b); })
+                            );
+                        }
+                    });
+                    await Promise.all(entries);
+                    hasValidZips = true;
+                    setCardStatus(rowIndex, 'done');
+                } catch {
+                    setCardStatus(rowIndex, 'failed');
                 }
             }
-            if (!hasValidZips) { toast.error('No valid ZIP files found in selected rows'); return; }
-            const finalZip = await masterZip.generateAsync({ type: 'blob' });
+
+            if (!hasValidZips) {
+                toast.error('No valid ZIP files found in selected rows');
+                setDlOverall('idle');
+                return;
+            }
+
+            setDlOverall('zipping');
+            await new Promise(r => setTimeout(r, 50));
+            const finalZip = await masterZip.generateAsync(
+                { type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } },
+            );
+            setDlOverall('ready');
+
             const link = document.createElement('a');
             link.href = URL.createObjectURL(finalZip);
-            link.download = `ID_Cards_${Date.now()}.zip`;
+            link.download = batchId ? `Batch_${batchId}_Cards.zip` : `ID_Cards_${Date.now()}.zip`;
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
@@ -387,12 +453,13 @@ const ImportManagement = () => {
         } catch (error) {
             console.error('Download error:', error);
             toast.error('Failed to download ZIP files');
+            setDlOverall('idle');
         }
     };
 
     const filteredData = React.useMemo(() => {
-        const dataWithIndex = csvData.map((row, index) => ({ row, index }));
-        if (filterAvailableOnly) return dataWithIndex.filter(({ index }) => isZipAvailable(index));
+        let dataWithIndex = csvData.map((row, index) => ({ row, index }));
+        if (filterAvailableOnly) dataWithIndex = dataWithIndex.filter(({ index }) => isZipAvailable(index));
         if (!searchQuery) return dataWithIndex;
         const q = searchQuery.toLowerCase().trim();
         const lc = headers.map(h => String(h || '').toLowerCase().trim());
@@ -661,15 +728,13 @@ const ImportManagement = () => {
                     if (cardElement) {
                         const fc = await html2canvas(cardElement.querySelector('.id-card-front') as HTMLElement, { scale: 12, useCORS: true, allowTaint: true });
                         const bc = await html2canvas(cardElement.querySelector('.id-card-back') as HTMLElement, { scale: 12, useCORS: true, allowTaint: true });
-                        const upload = async (path: string, dataUrl: string) => {
+                        const upload = async (fileName: string, path: string, dataUrl: string) => {
                             const blob = await (await fetch(dataUrl)).blob();
-                            const { error } = await supabase.storage.from('id-card-images').upload(path, blob, { upsert: true });
-                            if (error) throw error;
-                            return supabase.storage.from('id-card-images').getPublicUrl(path).data.publicUrl;
+                            return uploadImage(blob, fileName, path);
                         };
                         [front_image_url, back_image_url] = await Promise.all([
-                            upload(`public/bulk-${batchId || 'no-batch'}-${rowIndex}-front.png`, fc.toDataURL('image/png')),
-                            upload(`public/bulk-${batchId || 'no-batch'}-${rowIndex}-back.png`, bc.toDataURL('image/png')),
+                            upload(`bulk-${batchId || 'no-batch'}-${rowIndex}-front.png`, `public/bulk-${batchId || 'no-batch'}-${rowIndex}-front.png`, fc.toDataURL('image/png')),
+                            upload(`bulk-${batchId || 'no-batch'}-${rowIndex}-back.png`, `public/bulk-${batchId || 'no-batch'}-${rowIndex}-back.png`, bc.toDataURL('image/png')),
                         ]);
                     }
                 }
@@ -1073,11 +1138,25 @@ const ImportManagement = () => {
             {isCardViewOpen && cardViewEmployee && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
                     <div className="relative bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-lg w-full shadow-xl">
-                        <div className="flex justify-between items-center mb-4">
+                        <div className="flex justify-between items-center mb-3">
                             <h3 className="text-lg font-bold text-gray-900 dark:text-white">View Card</h3>
                             <button onClick={() => setIsCardViewOpen(false)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
                                 <X size={20} />
                             </button>
+                        </div>
+                        {/* Employee info strip */}
+                        <div className="flex items-center gap-3 mb-4 px-3 py-2 rounded-xl bg-gray-50 dark:bg-gray-900/40 border border-gray-100 dark:border-gray-700">
+                            <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">{cardViewEmployee.fullName}</p>
+                                <p className="text-xs font-mono text-orange-600 dark:text-orange-400 mt-0.5">
+                                    CLOVE-{cardViewEmployee.employeeId}
+                                </p>
+                            </div>
+                            {cardViewEmployee.branch && (
+                                <span className="text-xs font-medium px-2 py-0.5 rounded-lg bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 shrink-0">
+                                    {cardViewEmployee.branch}
+                                </span>
+                            )}
                         </div>
                         <div className="flex justify-center" style={{ perspective: '1000px' }}>
                             <div
@@ -1096,6 +1175,80 @@ const ImportManagement = () => {
                         <p className="text-center text-sm text-gray-500 dark:text-gray-400 mt-4">Click card to flip</p>
                         <div className="flex justify-end mt-4">
                             <button onClick={() => setIsCardViewOpen(false)} className="px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors">Close</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Bulk Download Progress Modal */}
+            {dlOverall !== 'idle' && (
+                <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+                    <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+                        <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+                            <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                                {dlOverall === 'processing' && 'Collecting cards…'}
+                                {dlOverall === 'zipping' && 'Creating ZIP archive…'}
+                                {dlOverall === 'ready' && 'Download started!'}
+                            </p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                {dlProgress.filter(p => p.status === 'done').length} / {dlProgress.length} card{dlProgress.length !== 1 ? 's' : ''} ready
+                            </p>
+                        </div>
+                        <ul className="max-h-64 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700">
+                            {dlProgress.map(p => {
+                                const statusMeta: Record<string, { label: string; color: string; spin?: boolean }> = {
+                                    waiting:    { label: 'Waiting',     color: 'text-gray-400' },
+                                    fetching:   { label: 'Fetching…',   color: 'text-blue-500',   spin: true },
+                                    extracting: { label: 'Extracting…', color: 'text-amber-500',  spin: true },
+                                    done:       { label: 'Ready',       color: 'text-emerald-600' },
+                                    failed:     { label: 'Failed',      color: 'text-red-500' },
+                                    no_zip:     { label: 'No ZIP',      color: 'text-gray-400' },
+                                };
+                                const meta = statusMeta[p.status];
+                                return (
+                                    <li key={p.cardId} className="flex items-center justify-between px-5 py-2.5 gap-3">
+                                        <span className="text-sm text-gray-700 dark:text-gray-300 truncate flex-1">{p.name}</span>
+                                        <span className={`flex items-center gap-1 text-xs font-medium shrink-0 ${meta.color}`}>
+                                            {meta.spin && <Loader2 size={11} className="animate-spin" />}
+                                            {p.status === 'done' && <CheckCircle2 size={11} />}
+                                            {p.status === 'failed' && <AlertCircle size={11} />}
+                                            {meta.label}
+                                        </span>
+                                    </li>
+                                );
+                            })}
+                        </ul>
+                        <div className="px-5 py-3 border-t border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30">
+                            {dlOverall === 'zipping' && (
+                                <div className="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400 mb-2">
+                                    <Loader2 size={12} className="animate-spin" /> Compressing into ZIP…
+                                </div>
+                            )}
+                            {dlOverall === 'ready' && (
+                                <div className="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400 mb-2">
+                                    <Download size={12} /> ZIP ready — download starting
+                                </div>
+                            )}
+                            <div className="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                                <div
+                                    className={`h-full rounded-full transition-all duration-300 ${dlOverall === 'ready' ? 'bg-emerald-500' : 'bg-orange-500'}`}
+                                    style={{
+                                        width: dlOverall === 'zipping' || dlOverall === 'ready'
+                                            ? '100%'
+                                            : `${Math.round((dlProgress.filter(p => ['done', 'failed', 'no_zip'].includes(p.status)).length / Math.max(dlProgress.length, 1)) * 100)}%`
+                                    }}
+                                />
+                            </div>
+                            {dlOverall === 'ready' && (
+                                <div className="flex justify-end mt-3">
+                                    <button
+                                        onClick={() => setDlOverall('idle')}
+                                        className="px-4 py-1.5 rounded-xl bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs font-medium hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                                    >
+                                        Close
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>

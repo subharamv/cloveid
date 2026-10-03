@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import { uploadZipToGoogleDrive } from '@/lib/googleDriveUpload';
+import { uploadZipToGoogleDrive, uploadPreviewImageToDrive } from '@/lib/googleDriveUpload';
 
 export type StorageProvider = 'supabase' | 'google_drive';
 
@@ -108,6 +108,30 @@ export const useStorageProvider = () => {
     return publicUrlData.publicUrl;
   };
 
+  /** Upload a one-off image (e.g. a print-preview PNG) honoring the active storage provider. */
+  const uploadImage = async (
+    imageBlob: Blob,
+    fileName: string,
+    supabasePath: string,
+  ): Promise<string> => {
+    if (provider === 'google_drive') {
+      const result = await uploadPreviewImageToDrive(imageBlob, fileName);
+      return result.downloadUrl;
+    }
+
+    const { error } = await supabase.storage
+      .from('id-card-images')
+      .upload(supabasePath, imageBlob, { upsert: true });
+
+    if (error) throw error;
+
+    const { data: publicUrlData } = supabase.storage
+      .from('id-card-images')
+      .getPublicUrl(supabasePath);
+
+    return publicUrlData.publicUrl;
+  };
+
   return {
     provider,
     loading,
@@ -117,5 +141,6 @@ export const useStorageProvider = () => {
     updateDriveFolder,
     refreshProvider: fetchSettings,
     uploadZip,
+    uploadImage,
   };
 };

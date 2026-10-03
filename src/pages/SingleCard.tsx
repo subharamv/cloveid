@@ -20,7 +20,7 @@ import { scale } from "@cloudinary/url-gen/actions/resize";
 import { quality, format } from "@cloudinary/url-gen/actions/delivery";
 import { auto } from "@cloudinary/url-gen/qualifiers/quality";
 import { auto as autoFormat } from "@cloudinary/url-gen/qualifiers/format";
-import { imageToDataUrl, compressImage } from '@/lib/utils';
+import { imageToDataUrl, compressImage, uploadCanvasToCloudinary } from '@/lib/utils';
 import { supabase } from '@/lib/supabaseClient';
 import { uploadRawPhotoToDrive } from '@/lib/googleDriveUpload';
 
@@ -423,6 +423,8 @@ const SingleCard: React.FC = () => {
             const oc = offscreen.getContext('2d');
             if (!oc) return;
 
+            oc.imageSmoothingEnabled = true;
+            oc.imageSmoothingQuality = 'high';
             oc.fillStyle = '#fff';
             oc.fillRect(0, 0, offscreen.width, offscreen.height);
             oc.save();
@@ -454,6 +456,8 @@ const SingleCard: React.FC = () => {
             oc.restore();
 
             // finally draw the offscreen to the visible canvas (scaled to rect)
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
             ctx.drawImage(offscreen, 0, 0, rect.width, rect.height);
         } catch (e) {
             console.error('drawEditor error', e);
@@ -640,6 +644,8 @@ const SingleCard: React.FC = () => {
                         const oc = offscreen.getContext('2d');
                         if (!oc) return;
 
+                        oc.imageSmoothingEnabled = true;
+                        oc.imageSmoothingQuality = 'high';
                         oc.fillStyle = '#fff';
                         oc.fillRect(0, 0, offscreen.width, offscreen.height);
                         oc.save();
@@ -668,7 +674,11 @@ const SingleCard: React.FC = () => {
                         canvasEl.width = TARGET_W_PX;
                         canvasEl.height = TARGET_H_PX;
                         const ctx = canvasEl.getContext('2d');
-                        ctx?.drawImage(offscreen, 0, 0, TARGET_W_PX, TARGET_H_PX);
+                        if (ctx) {
+                            ctx.imageSmoothingEnabled = true;
+                            ctx.imageSmoothingQuality = 'high';
+                            ctx.drawImage(offscreen, 0, 0, TARGET_W_PX, TARGET_H_PX);
+                        }
                     },
                 }).then(resolve).catch(reject);
             });
@@ -794,6 +804,20 @@ const SingleCard: React.FC = () => {
             setSaveProgress(10);
             setSaveMessage('Generating card images...');
 
+            // Upload the composed canvas (crop/zoom/rotation/filters already applied)
+            // so the saved photo_url matches exactly what's shown in the editor.
+            let composedPhotoUrl: string | null = null;
+            if (canvasRef.current && editor.img) {
+                drawEditor();
+                setSaveMessage('Uploading positioned photo...');
+                try {
+                    composedPhotoUrl = await uploadCanvasToCloudinary(canvasRef.current);
+                } catch (err) {
+                    console.warn('Failed to upload composed photo, falling back to raw photo URL:', err);
+                }
+            }
+            const finalPhotoUrl = composedPhotoUrl || employee.photo_url || null;
+
             // Generate ZIP file
             const zipBlob = await downloadZip(
                 employee,
@@ -817,7 +841,12 @@ const SingleCard: React.FC = () => {
 
             // Upload ZIP to active storage provider (Supabase or Google Drive)
             const zipFileName = `${employee.fullName.replace(/ /g, '_')}_${employee.employeeId}_ID_Card.zip`;
-            const zipUrl = await uploadZip(zipBlob, zipFileName, batchState?.sourceTable === 'id_cards' ? 'batch' : 'single');
+            const zipUrl = await uploadZip(
+                zipBlob,
+                zipFileName,
+                batchState?.sourceTable === 'id_cards' ? 'batch' : 'single',
+                batchState?.batchId || undefined,
+            );
 
             setSaveProgress(80);
             setSaveMessage('Saving card details...');
@@ -849,6 +878,7 @@ const SingleCard: React.FC = () => {
                         }
                     });
                 }
+                newCardData['zip_url'] = zipUrl;
 
                 let cardId = batchState.cardId;
                 if (!cardId) {
@@ -858,7 +888,7 @@ const SingleCard: React.FC = () => {
                             employee_id: employee.employeeId,
                             batch_id: batchState.batchId,
                             card_data: newCardData,
-                            photo_url: employee.photo_url || null,
+                            photo_url: finalPhotoUrl,
                             zip_url: zipUrl,
                             created_at: new Date().toISOString(),
                             updated_at: new Date().toISOString()
@@ -877,7 +907,7 @@ const SingleCard: React.FC = () => {
                         .from('id_cards')
                         .update({
                             card_data: newCardData,
-                            photo_url: employee.photo_url || null,
+                            photo_url: finalPhotoUrl,
                             zip_url: zipUrl,
                             updated_at: new Date().toISOString()
                         })
@@ -934,7 +964,7 @@ const SingleCard: React.FC = () => {
                 branch: employee.branch,
                 emergency_contact: employee.emergencyContact,
                 country_code: employee.countryCode,
-                photo_url: employee.photo_url || null,
+                photo_url: finalPhotoUrl,
                 zip_url: zipUrl,
                 created_at: new Date().toISOString(),
                 status: 'pending'
@@ -1044,6 +1074,7 @@ const SingleCard: React.FC = () => {
                                     onHideUploadNote={handleHideUploadNote}
                                     onShowModal={handleShowModal}
                                     isLoadingImage={isLoadingImage}
+                                    enableCamera
                                 />
                                 {editor.img && (
                                     <div className="border-t border-gray-100 dark:border-gray-800 pt-3 space-y-2">

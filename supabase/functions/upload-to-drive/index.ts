@@ -198,6 +198,8 @@ Deno.serve(async (req) => {
 
     if (uploadType === 'raw_photo') {
       targetFolderId = await findOrCreateFolder('Photos', rootFolderId, accessToken);
+    } else if (uploadType === 'print_preview') {
+      targetFolderId = await findOrCreateFolder('Print Previews', rootFolderId, accessToken);
     } else if (uploadType === 'processed_photo') {
       const employeeId = formData.get('employeeId') as string;
       if (!employeeId) throw new Error('Missing employeeId for processed_photo type');
